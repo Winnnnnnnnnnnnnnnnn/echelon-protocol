@@ -9,7 +9,7 @@ type AssetType = 'WETH' | 'ezETH' | 'USDY';
 interface AssetConfig {
   name: string;
   type: string;
-  category: 'Standar' | 'LRT' | 'RWA';
+  category: 'Standard' | 'LRT' | 'RWA';
   totalDeposited: string;
   borrowAPY: string;
   healthFactor: string;
@@ -22,13 +22,13 @@ const ASSET_DATA: Record<AssetType, AssetConfig> = {
   WETH: {
     name: 'WETH',
     type: 'Wrapped Ethereum',
-    category: 'Standar',
+    category: 'Standard',
     totalDeposited: '145.50 ETH',
     borrowAPY: '3.45%',
-    healthFactor: '1.85 (Aman)',
+    healthFactor: '1.85 (Safe)',
     maxLTV: '80%',
     oracleDeviation: '0.01%',
-    riskNote: 'Aset jaminan standar. Likuiditas DEX sangat dalam di Base.',
+    riskNote: 'Standard native collateral. Deep DEX liquidity on Base.',
   },
   ezETH: {
     name: 'ezETH',
@@ -36,10 +36,10 @@ const ASSET_DATA: Record<AssetType, AssetConfig> = {
     category: 'LRT',
     totalDeposited: '320.80 ezETH',
     borrowAPY: '5.12%',
-    healthFactor: '1.62 (Moderat)',
+    healthFactor: '1.62 (Moderate)',
     maxLTV: '75%',
     oracleDeviation: '0.42%',
-    riskNote: 'Pengawas deviasi pasak LRT aktif. Telemetri slashing tersinkronisasi.',
+    riskNote: 'LRT peg deviation watchdog active. Slashing telemetry synced.',
   },
   USDY: {
     name: 'USDY',
@@ -47,10 +47,10 @@ const ASSET_DATA: Record<AssetType, AssetConfig> = {
     category: 'RWA',
     totalDeposited: '$850,000 USDY',
     borrowAPY: '4.80%',
-    healthFactor: '2.10 (Sangat Aman)',
+    healthFactor: '2.10 (Ultra Safe)',
     maxLTV: '85%',
     oracleDeviation: '0.03%',
-    riskNote: 'Jaminan Treasury TradFi terverifikasi via Bukti Cadangan off-chain.',
+    riskNote: 'TradFi Treasury backing verified via off-chain Proof of Reserve.',
   },
 };
 
@@ -72,10 +72,10 @@ export default function Home() {
   const { isLoading: isTxConfirming, isSuccess: isTxSuccess } = useWaitForTransactionReceipt({ hash });
 
   const [telemetryData, setTelemetryData] = useState<{ [key: string]: string }>({
-    CRO: 'Siap memindai risiko kolateral Base...',
-    CFO: 'Siap mengoptimalkan APY & likuiditas...',
-    COO: 'Latensi Base RPC & waktu aktif server stabil.',
-    CTO: 'Pemutus sirkuit & pengawas oracle dalam status siaga.',
+    CRO: 'Ready to scan Base collateral risk...',
+    CFO: 'Ready to optimize APY & liquidity...',
+    COO: 'Base RPC latency & uptime stable.',
+    CTO: 'Circuit breaker & oracle watchdog on standby.',
   });
 
   useEffect(() => {
@@ -85,49 +85,49 @@ export default function Home() {
   const activeAsset = ASSET_DATA[selectedAsset];
 
   const handleDeposit = () => {
-    if (!isConnected) return alert('Sambungkan dompet terlebih dahulu!');
-    if (!depositAmount || Number(depositAmount) <= 0) return alert('Masukkan nominal deposit yang valid');
+    if (!isConnected) return alert('Please connect your wallet first!');
+    if (!depositAmount || Number(depositAmount) <= 0) return alert('Enter a valid deposit amount');
 
     try {
-      setActionStatus(`Mengirim deposit ${depositAmount} ${activeAsset.name} ke Base Sepolia...`);
+      setActionStatus(`Submitting deposit for ${depositAmount} ${activeAsset.name} to Base Sepolia...`);
       sendTransaction({
         to: '0x000000000000000000000000000000000000dEaD',
         value: parseEther(depositAmount.length > 0 ? (Number(depositAmount) * 0.0001).toFixed(6) : '0.0001'),
       });
     } catch (e: any) {
-      setActionStatus(`Transaksi gagal: ${e.message}`);
+      setActionStatus(`Transaction failed: ${e.message}`);
     }
   };
 
   const handleWithdraw = () => {
-    if (!isConnected) return alert('Sambungkan dompet terlebih dahulu!');
-    if (!withdrawAmount || Number(withdrawAmount) <= 0) return alert('Masukkan nominal penarikan yang valid');
+    if (!isConnected) return alert('Please connect your wallet first!');
+    if (!withdrawAmount || Number(withdrawAmount) <= 0) return alert('Enter a valid withdrawal amount');
 
-    setActionStatus(`Memproses penarikan ${withdrawAmount} ${activeAsset.name}... AI CRO memverifikasi margin keamanan.`);
+    setActionStatus(`Processing withdrawal for ${withdrawAmount} ${activeAsset.name}... AI CRO verifying safety margin.`);
     setTimeout(() => {
-      setActionStatus(`Penarikan ${withdrawAmount} ${activeAsset.name} berhasil diselesaikan di Base Sepolia.`);
+      setActionStatus(`Withdrawal of ${withdrawAmount} ${activeAsset.name} successfully executed on Base Sepolia.`);
       setWithdrawAmount('');
     }, 2000);
   };
 
   const handleBorrow = () => {
-    if (!isConnected) return alert('Sambungkan dompet terlebih dahulu!');
-    if (!borrowAmount || Number(borrowAmount) <= 0) return alert('Masukkan nominal pinjaman yang valid');
+    if (!isConnected) return alert('Please connect your wallet first!');
+    if (!borrowAmount || Number(borrowAmount) <= 0) return alert('Enter a valid borrow amount');
 
-    setActionStatus(`Memproses pinjaman ${borrowAmount} USDC... Likuiditas pool diverifikasi oleh AI CFO.`);
+    setActionStatus(`Processing borrow for ${borrowAmount} USDC... Vault liquidity verified by AI CFO.`);
     setTimeout(() => {
-      setActionStatus(`Pinjaman ${borrowAmount} USDC berhasil diproses di Base Sepolia.`);
+      setActionStatus(`Borrow for ${borrowAmount} USDC successfully executed on Base Sepolia.`);
       setBorrowAmount('');
     }, 2000);
   };
 
   const handleRepay = () => {
-    if (!isConnected) return alert('Sambungkan dompet terlebih dahulu!');
-    if (!repayAmount || Number(repayAmount) <= 0) return alert('Masukkan nominal pelunasan yang valid');
+    if (!isConnected) return alert('Please connect your wallet first!');
+    if (!repayAmount || Number(repayAmount) <= 0) return alert('Enter a valid repayment amount');
 
-    setActionStatus(`Memproses pelunasan ${repayAmount} USDC ke pool...`);
+    setActionStatus(`Processing repayment of ${repayAmount} USDC to vault...`);
     setTimeout(() => {
-      setActionStatus(`Pelunasan ${repayAmount} USDC berhasil. Faktor Kesehatan (Health Factor) meningkat.`);
+      setActionStatus(`Repayment of ${repayAmount} USDC successful. Health Factor restored.`);
       setRepayAmount('');
     }, 2000);
   };
@@ -157,10 +157,10 @@ export default function Home() {
       if (data.success) {
         setTelemetryData((prev) => ({ ...prev, [role]: data.telemetry }));
       } else {
-        setTelemetryData((prev) => ({ ...prev, [role]: `Kesalahan: ${data.error}` }));
+        setTelemetryData((prev) => ({ ...prev, [role]: `Error: ${data.error}` }));
       }
     } catch (err: any) {
-      setTelemetryData((prev) => ({ ...prev, [role]: `Gagal terhubung: ${err.message}` }));
+      setTelemetryData((prev) => ({ ...prev, [role]: `Failed to connect: ${err.message}` }));
     } finally {
       setLoadingRole(null);
     }
@@ -177,7 +177,7 @@ export default function Home() {
 
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-10 font-sans">
-      {/* Header Atas */}
+      {/* Top Header */}
       <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4 border-b border-slate-800/80 pb-6">
         <div>
           <div className="flex items-center gap-2">
@@ -189,7 +189,7 @@ export default function Home() {
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1 font-mono">
-            Pengawas Peminjaman Multi-Aset Otonom (Terlindungi Standar, LRT & RWA)
+            Autonomous Multi-Asset Lending Sentinel (Standard, LRT & RWA Protected)
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -197,13 +197,13 @@ export default function Home() {
             onClick={runAllAudits}
             className="px-4 py-2 bg-blue-600/20 hover:bg-blue-600/30 border border-blue-500/30 text-blue-400 rounded-xl font-medium text-xs transition active:scale-95 cursor-pointer"
           >
-            ⚡ Jalankan Semua Audit AI
+            ⚡ Run All AI Audits
           </button>
-          <ConnectButton label="Sambungkan Dompet" />
+          <ConnectButton label="Connect Wallet" />
         </div>
       </div>
 
-      {/* Tab Pemilihan Aset */}
+      {/* Asset Selector Tabs */}
       <div className="max-w-6xl mx-auto mb-6 flex items-center gap-3 overflow-x-auto pb-2">
         {(['WETH', 'ezETH', 'USDY'] as AssetType[]).map((assetKey) => {
           const item = ASSET_DATA[assetKey];
@@ -235,17 +235,17 @@ export default function Home() {
         })}
       </div>
 
-      {/* Konten Grid Utama */}
+      {/* Main Grid Content */}
       <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
         
-        {/* KOLOM KIRI: RINGKASAN VAULT & EKSEKUSI */}
+        {/* LEFT COLUMN: VAULT OVERVIEW & EXECUTION */}
         <div className="lg:col-span-7 space-y-6">
           
-          {/* Kartu Ringkasan Pool */}
+          {/* Pool Overview Card */}
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-md">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-semibold text-slate-200">
-                Ringkasan Vault {activeAsset.name}
+                {activeAsset.name} Vault Overview
               </h2>
               <span className="text-xs text-slate-400 font-mono">
                 {activeAsset.type}
@@ -254,29 +254,29 @@ export default function Home() {
 
             <div className="grid grid-cols-3 gap-4">
               <div className="bg-slate-950/60 border border-slate-800/60 p-3.5 rounded-xl">
-                <span className="text-xs text-slate-400">Total Agunan Pool</span>
+                <span className="text-xs text-slate-400">Total Pool Collateral</span>
                 <p className="text-lg font-bold text-white mt-1">{activeAsset.totalDeposited}</p>
               </div>
               <div className="bg-slate-950/60 border border-slate-800/60 p-3.5 rounded-xl">
-                <span className="text-xs text-slate-400">Bunga Pinjaman (APY)</span>
+                <span className="text-xs text-slate-400">Borrow APY</span>
                 <p className="text-lg font-bold text-emerald-400 mt-1">{activeAsset.borrowAPY}</p>
               </div>
               <div className="bg-slate-950/60 border border-slate-800/60 p-3.5 rounded-xl">
-                <span className="text-xs text-slate-400">Faktor Kesehatan</span>
+                <span className="text-xs text-slate-400">Health Factor</span>
                 <p className="text-lg font-bold text-blue-400 mt-1">{activeAsset.healthFactor}</p>
               </div>
             </div>
 
             <div className="mt-4 p-3 bg-slate-950/40 border border-slate-800/80 rounded-xl flex items-center justify-between text-xs">
-              <span className="text-slate-400">Status Pengawas Sentinel:</span>
+              <span className="text-slate-400">Sentinel Watchdog Status:</span>
               <span className="text-slate-300 font-mono">{activeAsset.riskNote}</span>
             </div>
           </div>
 
-          {/* Modul Eksekusi Vault dengan Tab */}
+          {/* Action Module with Tabs */}
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-md">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3 mb-5">
-              <h2 className="text-base font-semibold text-slate-200">Eksekusi Vault</h2>
+              <h2 className="text-base font-semibold text-slate-200">Vault Execution</h2>
               
               <div className="flex bg-slate-950/80 p-1 rounded-lg border border-slate-800 text-xs">
                 <button
@@ -293,7 +293,7 @@ export default function Home() {
                     activeTab === 'withdraw' ? 'bg-rose-600 text-white' : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  Tarik
+                  Withdraw
                 </button>
                 <button
                   onClick={() => setActiveTab('borrow')}
@@ -301,7 +301,7 @@ export default function Home() {
                     activeTab === 'borrow' ? 'bg-emerald-600 text-white' : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  Pinjam
+                  Borrow
                 </button>
                 <button
                   onClick={() => setActiveTab('repay')}
@@ -309,18 +309,18 @@ export default function Home() {
                     activeTab === 'repay' ? 'bg-amber-600 text-white' : 'text-slate-400 hover:text-slate-200'
                   }`}
                 >
-                  Lunasi
+                  Repay
                 </button>
               </div>
             </div>
             
             <div className="space-y-4">
-              {/* TAB DEPOSIT */}
+              {/* DEPOSIT TAB */}
               {activeTab === 'deposit' && (
                 <div className="bg-slate-950/40 border border-slate-800/80 p-4 rounded-xl space-y-3">
                   <div className="flex justify-between text-xs text-slate-400">
-                    <span>Deposit Agunan ({activeAsset.name})</span>
-                    <span>Batas LTV Maks: {activeAsset.maxLTV}</span>
+                    <span>Deposit Collateral ({activeAsset.name})</span>
+                    <span>Max LTV: {activeAsset.maxLTV}</span>
                   </div>
                   <div className="flex gap-2">
                     <input
@@ -335,18 +335,18 @@ export default function Home() {
                       disabled={isTxPending || isTxConfirming}
                       className="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white rounded-lg font-medium text-xs transition shrink-0 cursor-pointer"
                     >
-                      {isTxPending ? 'Menandatangani...' : isTxConfirming ? 'Mengonfirmasi...' : `Deposit ${activeAsset.name}`}
+                      {isTxPending ? 'Signing...' : isTxConfirming ? 'Confirming...' : `Deposit ${activeAsset.name}`}
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* TAB TARIK (WITHDRAW) */}
+              {/* WITHDRAW TAB */}
               {activeTab === 'withdraw' && (
                 <div className="bg-slate-950/40 border border-slate-800/80 p-4 rounded-xl space-y-3">
                   <div className="flex justify-between text-xs text-slate-400">
-                    <span>Tarik Agunan ({activeAsset.name})</span>
-                    <span className="text-amber-400">Pemeriksaan Risiko Sentinel: Aktif</span>
+                    <span>Withdraw Collateral ({activeAsset.name})</span>
+                    <span className="text-amber-400">Sentinel Risk Check: Active</span>
                   </div>
                   <div className="flex gap-2">
                     <input
@@ -360,18 +360,18 @@ export default function Home() {
                       onClick={handleWithdraw}
                       className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-medium text-xs transition shrink-0 cursor-pointer"
                     >
-                      Tarik {activeAsset.name}
+                      Withdraw {activeAsset.name}
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* TAB PINJAM (BORROW) */}
+              {/* BORROW TAB */}
               {activeTab === 'borrow' && (
                 <div className="bg-slate-950/40 border border-slate-800/80 p-4 rounded-xl space-y-3">
                   <div className="flex justify-between text-xs text-slate-400">
-                    <span>Pinjam Likuiditas (USDC)</span>
-                    <span>Batas Likuidasi: 85%</span>
+                    <span>Borrow Liquidity (USDC)</span>
+                    <span>Liquidation Threshold: 85%</span>
                   </div>
                   <div className="flex gap-2">
                     <input
@@ -385,18 +385,18 @@ export default function Home() {
                       onClick={handleBorrow}
                       className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium text-xs transition shrink-0 cursor-pointer"
                     >
-                      Pinjam USDC
+                      Borrow USDC
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* TAB LUNASI (REPAY) */}
+              {/* REPAY TAB */}
               {activeTab === 'repay' && (
                 <div className="bg-slate-950/40 border border-slate-800/80 p-4 rounded-xl space-y-3">
                   <div className="flex justify-between text-xs text-slate-400">
-                    <span>Lunasi Utang Pinjaman (USDC)</span>
-                    <span className="text-emerald-400">Memulihkan Faktor Kesehatan</span>
+                    <span>Repay Debt (USDC)</span>
+                    <span className="text-emerald-400">Restores Health Factor</span>
                   </div>
                   <div className="flex gap-2">
                     <input
@@ -410,16 +410,16 @@ export default function Home() {
                       onClick={handleRepay}
                       className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium text-xs transition shrink-0 cursor-pointer"
                     >
-                      Lunasi Utang
+                      Repay Debt
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* Bar Status Aktivitas */}
+              {/* Status Activity Bar */}
               {actionStatus && (
                 <div className="p-3 bg-blue-950/30 border border-blue-800/50 rounded-xl text-xs text-blue-300 font-mono">
-                  {actionStatus} {isTxSuccess && '— Transaksi On-Chain Berhasil Dikonfirmasi!'}
+                  {actionStatus} {isTxSuccess && '— On-Chain Transaction Confirmed!'}
                 </div>
               )}
             </div>
@@ -427,11 +427,11 @@ export default function Home() {
 
         </div>
 
-        {/* KOLOM KANAN: 4 AGEN AI C-LEVEL SENTINEL GEMINI FLASH */}
+        {/* RIGHT COLUMN: 4 GEMINI FLASH C-LEVEL SENTINEL AGENTS */}
         <div className="lg:col-span-5 space-y-4">
           <div className="flex justify-between items-center px-1">
             <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
-              Agen C-Level Otonom
+              Autonomous C-Level Agents
             </h2>
             <span className="text-[11px] text-blue-400 font-mono">Gemini 3.6 Flash</span>
           </div>
@@ -440,14 +440,14 @@ export default function Home() {
           <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
             <div className="flex justify-between items-center mb-2">
               <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                AI CRO • Pengawas Risiko
+                AI CRO • Risk Sentinel
               </span>
               <button
                 onClick={() => runSentinelAudit('CRO')}
                 disabled={loadingRole === 'CRO'}
                 className="text-[11px] text-blue-400 hover:underline cursor-pointer"
               >
-                {loadingRole === 'CRO' ? 'Memindai...' : 'Audit'}
+                {loadingRole === 'CRO' ? 'Scanning...' : 'Audit'}
               </button>
             </div>
             <p className="text-xs text-slate-300 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80 font-mono leading-relaxed">
@@ -459,14 +459,14 @@ export default function Home() {
           <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
             <div className="flex justify-between items-center mb-2">
               <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                AI CFO • Pengoptimal Imbal Hasil
+                AI CFO • Yield Optimizer
               </span>
               <button
                 onClick={() => runSentinelAudit('CFO')}
                 disabled={loadingRole === 'CFO'}
                 className="text-[11px] text-blue-400 hover:underline cursor-pointer"
               >
-                {loadingRole === 'CFO' ? 'Menghitung...' : 'Audit'}
+                {loadingRole === 'CFO' ? 'Calculating...' : 'Audit'}
               </button>
             </div>
             <p className="text-xs text-slate-300 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80 font-mono leading-relaxed">
@@ -478,14 +478,14 @@ export default function Home() {
           <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
             <div className="flex justify-between items-center mb-2">
               <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                AI COO • Pengawas Infrastruktur & Gas
+                AI COO • Infra & Gas Watchdog
               </span>
               <button
                 onClick={() => runSentinelAudit('COO')}
                 disabled={loadingRole === 'COO'}
                 className="text-[11px] text-blue-400 hover:underline cursor-pointer"
               >
-                {loadingRole === 'COO' ? 'Memeriksa...' : 'Audit'}
+                {loadingRole === 'COO' ? 'Checking...' : 'Audit'}
               </button>
             </div>
             <p className="text-xs text-slate-300 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80 font-mono leading-relaxed">
@@ -497,14 +497,14 @@ export default function Home() {
           <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-4">
             <div className="flex justify-between items-center mb-2">
               <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                AI CTO • Keamanan & Pemutus Sirkuit
+                AI CTO • Security & Circuit Guard
               </span>
               <button
                 onClick={() => runSentinelAudit('CTO')}
                 disabled={loadingRole === 'CTO'}
                 className="text-[11px] text-blue-400 hover:underline cursor-pointer"
               >
-                {loadingRole === 'CTO' ? 'Mengaudit...' : 'Audit'}
+                {loadingRole === 'CTO' ? 'Auditing...' : 'Audit'}
               </button>
             </div>
             <p className="text-xs text-slate-300 bg-slate-950/60 p-2.5 rounded-lg border border-slate-800/80 font-mono leading-relaxed">
