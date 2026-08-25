@@ -14,6 +14,7 @@ interface AssetConfig {
   borrowAPY: string;
   healthFactor: string;
   maxLTV: string;
+  ltvFactor: number;
   oracleDeviation: string;
   riskNote: string;
 }
@@ -27,6 +28,7 @@ const ASSET_DATA: Record<AssetType, AssetConfig> = {
     borrowAPY: '3.45%',
     healthFactor: '1.85 (Safe)',
     maxLTV: '80%',
+    ltvFactor: 0.80,
     oracleDeviation: '0.01%',
     riskNote: 'Standard native collateral. Deep DEX liquidity on Base.',
   },
@@ -38,6 +40,7 @@ const ASSET_DATA: Record<AssetType, AssetConfig> = {
     borrowAPY: '5.12%',
     healthFactor: '1.62 (Moderate)',
     maxLTV: '75%',
+    ltvFactor: 0.75,
     oracleDeviation: '0.42%',
     riskNote: 'LRT peg deviation watchdog active. Slashing telemetry synced.',
   },
@@ -49,6 +52,7 @@ const ASSET_DATA: Record<AssetType, AssetConfig> = {
     borrowAPY: '4.80%',
     healthFactor: '2.10 (Ultra Safe)',
     maxLTV: '85%',
+    ltvFactor: 0.85,
     oracleDeviation: '0.03%',
     riskNote: 'TradFi Treasury backing verified via off-chain Proof of Reserve.',
   },
@@ -64,6 +68,13 @@ export default function Home() {
   const [borrowAmount, setBorrowAmount] = useState('');
   const [repayAmount, setRepayAmount] = useState('');
   
+  // User Positions per Asset
+  const [userBalances, setUserBalances] = useState<Record<AssetType, { deposited: number; borrowed: number }>>({
+    WETH: { deposited: 0, borrowed: 0 },
+    ezETH: { deposited: 0, borrowed: 0 },
+    USDY: { deposited: 0, borrowed: 0 },
+  });
+
   const [loadingRole, setLoadingRole] = useState<string | null>(null);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
 
@@ -83,17 +94,29 @@ export default function Home() {
   }, []);
 
   const activeAsset = ASSET_DATA[selectedAsset];
+  const currentPosition = userBalances[selectedAsset];
+  const maxBorrowCapacity = (currentPosition.deposited * activeAsset.ltvFactor) - currentPosition.borrowed;
 
   const handleDeposit = () => {
     if (!isConnected) return alert('Please connect your wallet first!');
-    if (!depositAmount || Number(depositAmount) <= 0) return alert('Enter a valid deposit amount');
+    const amount = Number(depositAmount);
+    if (!depositAmount || amount <= 0) return alert('Enter a valid deposit amount');
 
     try {
       setActionStatus(`Submitting deposit for ${depositAmount} ${activeAsset.name} to Base Sepolia...`);
       sendTransaction({
         to: '0x000000000000000000000000000000000000dEaD',
-        value: parseEther(depositAmount.length > 0 ? (Number(depositAmount) * 0.0001).toFixed(6) : '0.0001'),
+        value: parseEther((amount * 0.0001).toFixed(6)),
       });
+
+      setUserBalances((prev) => ({
+        ...prev,
+        [selectedAsset]: {
+          ...prev[selectedAsset],
+          deposited: prev[selectedAsset].deposited + amount,
+        },
+      }));
+      setDepositAmount('');
     } catch (e: any) {
       setActionStatus(`Transaction failed: ${e.message}`);
     }
@@ -101,35 +124,89 @@ export default function Home() {
 
   const handleWithdraw = () => {
     if (!isConnected) return alert('Please connect your wallet first!');
-    if (!withdrawAmount || Number(withdrawAmount) <= 0) return alert('Enter a valid withdrawal amount');
+    const amount = Number(withdrawAmount);
+    if (!withdrawAmount || amount <= 0) return alert('Enter a valid withdrawal amount');
+
+    if (amount > currentPosition.deposited) {
+      return alert(`Insufficient deposit balance. You only deposited ${currentPosition.deposited} ${activeAsset.name}.`);
+    }
+
+    // Check if withdrawal drops collateral below required borrowed debt backing
+    const remainingDeposit = currentPosition.deposited - amount;
+    const requiredDepositForDebt = currentPosition.borrowed / activeAsset.ltvFactor;
+    if (remainingDeposit < requiredDepositForDebt) {
+      return alert(`Action Blocked by AI CRO: Withdrawal would cause instant liquidation. Repay your debt first.`);
+    }
 
     setActionStatus(`Processing withdrawal for ${withdrawAmount} ${activeAsset.name}... AI CRO verifying safety margin.`);
     setTimeout(() => {
-      setActionStatus(`Withdrawal of ${withdrawAmount} ${activeAsset.name} successfully executed on Base Sepolia.`);
+      setUserBalances((prev) => ({
+        ...prev,
+        [selectedAsset]: {
+          ...prev[selectedAsset],
+          deposited: prev[selectedAsset].deposited - amount,
+        },
+      }));
+      setActionStatus(`Withdrawal of ${withdrawAmount} ${activeAsset.name} successfully completed on Base Sepolia.`);
       setWithdrawAmount('');
-    }, 2000);
+    }, 1500);
   };
 
   const handleBorrow = () => {
     if (!isConnected) return alert('Please connect your wallet first!');
-    if (!borrowAmount || Number(borrowAmount) <= 0) return alert('Enter a valid borrow amount');
+    const amount = Number(borrowAmount);
+    if (!borrowAmount || amount <= 0) return alert('Enter a valid borrow amount');
+
+    // Rule: Cannot borrow without deposit
+    if (currentPosition.deposited <= 0) {
+      return alert(`Action Denied: You must deposit ${activeAsset.name} collateral before borrowing.`);
+    }
+
+    // Rule: Cannot exceed Max LTV borrowing capacity
+    if (amount > maxBorrowCapacity) {
+      return alert(`Action Blocked: Max borrow limit exceeded. Available capacity: ${Math.max(0, maxBorrowCapacity).toFixed(4)} USDC equivalent.`);
+    }
 
     setActionStatus(`Processing borrow for ${borrowAmount} USDC... Vault liquidity verified by AI CFO.`);
     setTimeout(() => {
+      setUserBalances((prev) => ({
+        ...prev,
+        [selectedAsset]: {
+          ...prev[selectedAsset],
+          borrowed: prev[selectedAsset].borrowed + amount,
+        },
+      }));
       setActionStatus(`Borrow for ${borrowAmount} USDC successfully executed on Base Sepolia.`);
       setBorrowAmount('');
-    }, 2000);
+    }, 1500);
   };
 
   const handleRepay = () => {
     if (!isConnected) return alert('Please connect your wallet first!');
-    if (!repayAmount || Number(repayAmount) <= 0) return alert('Enter a valid repayment amount');
+    const amount = Number(repayAmount);
+    if (!repayAmount || amount <= 0) return alert('Enter a valid repayment amount');
+
+    // Rule: Cannot repay without active borrow debt
+    if (currentPosition.borrowed <= 0) {
+      return alert(`Action Denied: You have no active debt to repay for ${activeAsset.name} vault.`);
+    }
+
+    if (amount > currentPosition.borrowed) {
+      return alert(`Repayment amount exceeds outstanding debt of ${currentPosition.borrowed.toFixed(4)} USDC.`);
+    }
 
     setActionStatus(`Processing repayment of ${repayAmount} USDC to vault...`);
     setTimeout(() => {
+      setUserBalances((prev) => ({
+        ...prev,
+        [selectedAsset]: {
+          ...prev[selectedAsset],
+          borrowed: Math.max(0, prev[selectedAsset].borrowed - amount),
+        },
+      }));
       setActionStatus(`Repayment of ${repayAmount} USDC successful. Health Factor restored.`);
       setRepayAmount('');
-    }, 2000);
+    }, 1500);
   };
 
   const runSentinelAudit = async (role: 'CRO' | 'CFO' | 'COO' | 'CTO') => {
@@ -145,6 +222,8 @@ export default function Home() {
         oracleDeviation: activeAsset.oracleDeviation,
         baseGasGwei: '0.005 Gwei',
         riskContext: activeAsset.riskNote,
+        userDeposited: `${currentPosition.deposited} ${activeAsset.name}`,
+        userBorrowed: `${currentPosition.borrowed} USDC`,
       };
 
       const res = await fetch('/api/sentinel', {
@@ -267,7 +346,19 @@ export default function Home() {
               </div>
             </div>
 
-            <div className="mt-4 p-3 bg-slate-950/40 border border-slate-800/80 rounded-xl flex items-center justify-between text-xs">
+            {/* User Realtime Position in Vault */}
+            <div className="mt-4 p-3 bg-slate-950/70 border border-slate-800 rounded-xl grid grid-cols-2 gap-3 text-xs">
+              <div>
+                <span className="text-slate-400">Your Deposited Collateral:</span>
+                <p className="text-sm font-semibold text-white font-mono mt-0.5">{currentPosition.deposited} {activeAsset.name}</p>
+              </div>
+              <div>
+                <span className="text-slate-400">Your Active Debt:</span>
+                <p className="text-sm font-semibold text-amber-400 font-mono mt-0.5">{currentPosition.borrowed.toFixed(2)} USDC</p>
+              </div>
+            </div>
+
+            <div className="mt-3 p-3 bg-slate-950/40 border border-slate-800/80 rounded-xl flex items-center justify-between text-xs">
               <span className="text-slate-400">Sentinel Watchdog Status:</span>
               <span className="text-slate-300 font-mono">{activeAsset.riskNote}</span>
             </div>
@@ -346,7 +437,7 @@ export default function Home() {
                 <div className="bg-slate-950/40 border border-slate-800/80 p-4 rounded-xl space-y-3">
                   <div className="flex justify-between text-xs text-slate-400">
                     <span>Withdraw Collateral ({activeAsset.name})</span>
-                    <span className="text-amber-400">Sentinel Risk Check: Active</span>
+                    <span className="text-slate-400">Available to withdraw: {currentPosition.deposited} {activeAsset.name}</span>
                   </div>
                   <div className="flex gap-2">
                     <input
@@ -371,7 +462,9 @@ export default function Home() {
                 <div className="bg-slate-950/40 border border-slate-800/80 p-4 rounded-xl space-y-3">
                   <div className="flex justify-between text-xs text-slate-400">
                     <span>Borrow Liquidity (USDC)</span>
-                    <span>Liquidation Threshold: 85%</span>
+                    <span className={currentPosition.deposited > 0 ? "text-emerald-400 font-mono" : "text-rose-400 font-mono"}>
+                      {currentPosition.deposited > 0 ? `Max Borrow Capacity: ${Math.max(0, maxBorrowCapacity).toFixed(4)} USDC` : 'Requires Collateral Deposit'}
+                    </span>
                   </div>
                   <div className="flex gap-2">
                     <input
@@ -396,7 +489,9 @@ export default function Home() {
                 <div className="bg-slate-950/40 border border-slate-800/80 p-4 rounded-xl space-y-3">
                   <div className="flex justify-between text-xs text-slate-400">
                     <span>Repay Debt (USDC)</span>
-                    <span className="text-emerald-400">Restores Health Factor</span>
+                    <span className={currentPosition.borrowed > 0 ? "text-amber-400 font-mono" : "text-slate-400 font-mono"}>
+                      {currentPosition.borrowed > 0 ? `Outstanding Debt: ${currentPosition.borrowed.toFixed(4)} USDC` : 'No Active Debt'}
+                    </span>
                   </div>
                   <div className="flex gap-2">
                     <input
