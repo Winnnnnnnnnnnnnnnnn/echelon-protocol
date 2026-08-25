@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useSendTransaction, useWaitForTransactionReceipt } from 'wagmi';
+import { useAccount, useBalance, useSendTransaction, useWaitForTransactionReceipt } from 'wagmi';
 import { parseEther } from 'viem';
 
 const PROTOCOL_VAULT_ADDRESS = '0xC95DDE4889e05d261618fD33baC37011C5a307D4' as `0x${string}`;
@@ -70,7 +70,7 @@ export default function Home() {
   const [borrowAmount, setBorrowAmount] = useState('');
   const [repayAmount, setRepayAmount] = useState('');
 
-  // Dynamic Total Pool Collateral State per Asset
+  // Fallback / mock dynamic totals for non-native tokens
   const [poolCollaterals, setPoolCollaterals] = useState<Record<AssetType, number>>({
     WETH: 145.50,
     ezETH: 320.80,
@@ -91,6 +91,11 @@ export default function Home() {
   const { data: hash, sendTransaction, isPending: isTxPending } = useSendTransaction();
   const { isLoading: isTxConfirming, isSuccess: isTxSuccess } = useWaitForTransactionReceipt({ hash });
 
+  // On-Chain Realtime Balance of Protocol Vault on Base Sepolia
+  const { data: vaultBalanceData, refetch: refetchVaultBalance } = useBalance({
+    address: PROTOCOL_VAULT_ADDRESS,
+  });
+
   const [telemetryData, setTelemetryData] = useState<{ [key: string]: string }>({
     CRO: 'Ready to scan Base collateral risk...',
     CFO: 'Ready to optimize APY & liquidity...',
@@ -102,11 +107,22 @@ export default function Home() {
     setMounted(true);
   }, []);
 
+  useEffect(() => {
+    if (isTxSuccess) {
+      refetchVaultBalance();
+    }
+  }, [isTxSuccess, refetchVaultBalance]);
+
   const activeAsset = ASSET_DATA[selectedAsset];
   const currentPosition = userBalances[selectedAsset];
   const maxBorrowCapacity = (currentPosition.deposited * activeAsset.ltvFactor) - currentPosition.borrowed;
 
   const formatPoolDisplay = (asset: AssetType) => {
+    if (asset === 'WETH' && vaultBalanceData) {
+      const liveEth = Number(vaultBalanceData.formatted);
+      return `${liveEth.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 })} ETH (Live)`;
+    }
+
     const val = poolCollaterals[asset];
     if (asset === 'USDY') {
       return `$${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDY`;
@@ -126,7 +142,6 @@ export default function Home() {
         value: parseEther((amount * 0.0001).toFixed(6)),
       });
 
-      // Update User Position
       setUserBalances((prev) => ({
         ...prev,
         [selectedAsset]: {
@@ -135,7 +150,6 @@ export default function Home() {
         },
       }));
 
-      // Dynamically Update Total Pool Collateral
       setPoolCollaterals((prev) => ({
         ...prev,
         [selectedAsset]: prev[selectedAsset] + amount,
@@ -172,7 +186,6 @@ export default function Home() {
         },
       }));
 
-      // Dynamically Deduct Total Pool Collateral
       setPoolCollaterals((prev) => ({
         ...prev,
         [selectedAsset]: Math.max(0, prev[selectedAsset] - amount),
@@ -361,7 +374,12 @@ export default function Home() {
 
             <div className="grid grid-cols-3 gap-4">
               <div className="bg-slate-950/60 border border-slate-800/60 p-3.5 rounded-xl">
-                <span className="text-xs text-slate-400">Total Pool Collateral</span>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-400">Total Pool Collateral</span>
+                  {selectedAsset === 'WETH' && (
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Live On-Chain"></span>
+                  )}
+                </div>
                 <p className="text-lg font-bold text-white mt-1 font-mono">
                   {formatPoolDisplay(selectedAsset)}
                 </p>
