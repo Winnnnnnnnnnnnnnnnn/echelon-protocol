@@ -4,13 +4,15 @@ import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useSendTransaction, useWaitForTransactionReceipt } from 'wagmi';
 import { parseEther } from 'viem';
 
+const PROTOCOL_VAULT_ADDRESS = '0xC95DDE4889e05d261618fD33baC37011C5a307D4' as `0x${string}`;
+
 type AssetType = 'WETH' | 'ezETH' | 'USDY';
 
 interface AssetConfig {
   name: string;
   type: string;
   category: 'Standard' | 'LRT' | 'RWA';
-  totalDeposited: string;
+  unit: string;
   borrowAPY: string;
   healthFactor: string;
   maxLTV: string;
@@ -24,7 +26,7 @@ const ASSET_DATA: Record<AssetType, AssetConfig> = {
     name: 'WETH',
     type: 'Wrapped Ethereum',
     category: 'Standard',
-    totalDeposited: '145.50 ETH',
+    unit: 'ETH',
     borrowAPY: '3.45%',
     healthFactor: '1.85 (Safe)',
     maxLTV: '80%',
@@ -36,7 +38,7 @@ const ASSET_DATA: Record<AssetType, AssetConfig> = {
     name: 'ezETH',
     type: 'Renzo Restaked ETH',
     category: 'LRT',
-    totalDeposited: '320.80 ezETH',
+    unit: 'ezETH',
     borrowAPY: '5.12%',
     healthFactor: '1.62 (Moderate)',
     maxLTV: '75%',
@@ -48,7 +50,7 @@ const ASSET_DATA: Record<AssetType, AssetConfig> = {
     name: 'USDY',
     type: 'Ondo US Dollar Yield',
     category: 'RWA',
-    totalDeposited: '$850,000 USDY',
+    unit: 'USDY',
     borrowAPY: '4.80%',
     healthFactor: '2.10 (Ultra Safe)',
     maxLTV: '85%',
@@ -67,6 +69,13 @@ export default function Home() {
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [borrowAmount, setBorrowAmount] = useState('');
   const [repayAmount, setRepayAmount] = useState('');
+
+  // Dynamic Total Pool Collateral State per Asset
+  const [poolCollaterals, setPoolCollaterals] = useState<Record<AssetType, number>>({
+    WETH: 145.50,
+    ezETH: 320.80,
+    USDY: 850000,
+  });
   
   // User Positions per Asset
   const [userBalances, setUserBalances] = useState<Record<AssetType, { deposited: number; borrowed: number }>>({
@@ -97,18 +106,27 @@ export default function Home() {
   const currentPosition = userBalances[selectedAsset];
   const maxBorrowCapacity = (currentPosition.deposited * activeAsset.ltvFactor) - currentPosition.borrowed;
 
+  const formatPoolDisplay = (asset: AssetType) => {
+    const val = poolCollaterals[asset];
+    if (asset === 'USDY') {
+      return `$${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDY`;
+    }
+    return `${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${activeAsset.unit}`;
+  };
+
   const handleDeposit = () => {
     if (!isConnected) return alert('Please connect your wallet first!');
     const amount = Number(depositAmount);
     if (!depositAmount || amount <= 0) return alert('Enter a valid deposit amount');
 
     try {
-      setActionStatus(`Submitting deposit for ${depositAmount} ${activeAsset.name} to Base Sepolia...`);
+      setActionStatus(`Submitting deposit for ${depositAmount} ${activeAsset.name} to Vault on Base Sepolia...`);
       sendTransaction({
-        to: '0xC95DDE4889e05d261618fD33baC37011C5a307D4',
+        to: PROTOCOL_VAULT_ADDRESS,
         value: parseEther((amount * 0.0001).toFixed(6)),
       });
 
+      // Update User Position
       setUserBalances((prev) => ({
         ...prev,
         [selectedAsset]: {
@@ -116,6 +134,13 @@ export default function Home() {
           deposited: prev[selectedAsset].deposited + amount,
         },
       }));
+
+      // Dynamically Update Total Pool Collateral
+      setPoolCollaterals((prev) => ({
+        ...prev,
+        [selectedAsset]: prev[selectedAsset] + amount,
+      }));
+
       setDepositAmount('');
     } catch (e: any) {
       setActionStatus(`Transaction failed: ${e.message}`);
@@ -131,7 +156,6 @@ export default function Home() {
       return alert(`Insufficient deposit balance. You only deposited ${currentPosition.deposited} ${activeAsset.name}.`);
     }
 
-    // Check if withdrawal drops collateral below required borrowed debt backing
     const remainingDeposit = currentPosition.deposited - amount;
     const requiredDepositForDebt = currentPosition.borrowed / activeAsset.ltvFactor;
     if (remainingDeposit < requiredDepositForDebt) {
@@ -147,6 +171,13 @@ export default function Home() {
           deposited: prev[selectedAsset].deposited - amount,
         },
       }));
+
+      // Dynamically Deduct Total Pool Collateral
+      setPoolCollaterals((prev) => ({
+        ...prev,
+        [selectedAsset]: Math.max(0, prev[selectedAsset] - amount),
+      }));
+
       setActionStatus(`Withdrawal of ${withdrawAmount} ${activeAsset.name} successfully completed on Base Sepolia.`);
       setWithdrawAmount('');
     }, 1500);
@@ -157,12 +188,10 @@ export default function Home() {
     const amount = Number(borrowAmount);
     if (!borrowAmount || amount <= 0) return alert('Enter a valid borrow amount');
 
-    // Rule: Cannot borrow without deposit
     if (currentPosition.deposited <= 0) {
       return alert(`Action Denied: You must deposit ${activeAsset.name} collateral before borrowing.`);
     }
 
-    // Rule: Cannot exceed Max LTV borrowing capacity
     if (amount > maxBorrowCapacity) {
       return alert(`Action Blocked: Max borrow limit exceeded. Available capacity: ${Math.max(0, maxBorrowCapacity).toFixed(4)} USDC equivalent.`);
     }
@@ -186,7 +215,6 @@ export default function Home() {
     const amount = Number(repayAmount);
     if (!repayAmount || amount <= 0) return alert('Enter a valid repayment amount');
 
-    // Rule: Cannot repay without active borrow debt
     if (currentPosition.borrowed <= 0) {
       return alert(`Action Denied: You have no active debt to repay for ${activeAsset.name} vault.`);
     }
@@ -215,7 +243,7 @@ export default function Home() {
       const vaultData = {
         asset: activeAsset.name,
         category: activeAsset.category,
-        totalDeposited: activeAsset.totalDeposited,
+        totalDeposited: formatPoolDisplay(selectedAsset),
         borrowAPY: activeAsset.borrowAPY,
         healthFactor: activeAsset.healthFactor,
         maxLTV: activeAsset.maxLTV,
@@ -334,15 +362,17 @@ export default function Home() {
             <div className="grid grid-cols-3 gap-4">
               <div className="bg-slate-950/60 border border-slate-800/60 p-3.5 rounded-xl">
                 <span className="text-xs text-slate-400">Total Pool Collateral</span>
-                <p className="text-lg font-bold text-white mt-1">{activeAsset.totalDeposited}</p>
+                <p className="text-lg font-bold text-white mt-1 font-mono">
+                  {formatPoolDisplay(selectedAsset)}
+                </p>
               </div>
               <div className="bg-slate-950/60 border border-slate-800/60 p-3.5 rounded-xl">
                 <span className="text-xs text-slate-400">Borrow APY</span>
-                <p className="text-lg font-bold text-emerald-400 mt-1">{activeAsset.borrowAPY}</p>
+                <p className="text-lg font-bold text-emerald-400 mt-1 font-mono">{activeAsset.borrowAPY}</p>
               </div>
               <div className="bg-slate-950/60 border border-slate-800/60 p-3.5 rounded-xl">
                 <span className="text-xs text-slate-400">Health Factor</span>
-                <p className="text-lg font-bold text-blue-400 mt-1">{activeAsset.healthFactor}</p>
+                <p className="text-lg font-bold text-blue-400 mt-1 font-mono">{activeAsset.healthFactor}</p>
               </div>
             </div>
 
