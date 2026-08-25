@@ -70,8 +70,9 @@ export default function Home() {
   const [withdrawAmount, setWithdrawAmount] = useState('');
   const [borrowAmount, setBorrowAmount] = useState('');
   const [repayAmount, setRepayAmount] = useState('');
+  const [isProcessingVaultTx, setIsProcessingVaultTx] = useState(false);
 
-  // Fallback / mock dynamic totals for non-native tokens
+  // Dynamic Collateral State
   const [poolCollaterals, setPoolCollaterals] = useState<Record<AssetType, number>>({
     WETH: 145.50,
     ezETH: 320.80,
@@ -88,11 +89,10 @@ export default function Home() {
   const [loadingRole, setLoadingRole] = useState<string | null>(null);
   const [actionStatus, setActionStatus] = useState<string | null>(null);
 
-  const { isConnected } = useAccount();
+  const { address: userAddress, isConnected } = useAccount();
   const { data: hash, sendTransaction, isPending: isTxPending } = useSendTransaction();
   const { isLoading: isTxConfirming, isSuccess: isTxSuccess } = useWaitForTransactionReceipt({ hash });
 
-  // On-Chain Realtime Balance of Protocol Vault on Base Sepolia
   const { data: vaultBalanceData, isLoading: isVaultLoading, refetch: refetchVaultBalance } = useBalance({
     address: PROTOCOL_VAULT_ADDRESS,
     chainId: baseSepolia.id,
@@ -166,7 +166,7 @@ export default function Home() {
     }
   };
 
-  const handleWithdraw = () => {
+  const handleWithdraw = async () => {
     if (!isConnected) return alert('Please connect your wallet first!');
     const amount = Number(withdrawAmount);
     if (!withdrawAmount || amount <= 0) return alert('Enter a valid withdrawal amount');
@@ -181,8 +181,23 @@ export default function Home() {
       return alert(`Action Blocked by AI CRO: Withdrawal would cause instant liquidation. Repay your debt first.`);
     }
 
-    setActionStatus(`Processing withdrawal for ${withdrawAmount} ${activeAsset.name}... AI CRO verifying safety margin.`);
-    setTimeout(() => {
+    setIsProcessingVaultTx(true);
+    setActionStatus(`Initiating vault transfer: Sending ${withdrawAmount} ${activeAsset.name} back to your wallet...`);
+
+    try {
+      const res = await fetch('/api/vault-transfer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userAddress,
+          amount: withdrawAmount,
+          actionType: 'withdraw',
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
       setUserBalances((prev) => ({
         ...prev,
         [selectedAsset]: {
@@ -196,12 +211,17 @@ export default function Home() {
         [selectedAsset]: Math.max(0, prev[selectedAsset] - amount),
       }));
 
-      setActionStatus(`Withdrawal of ${withdrawAmount} ${activeAsset.name} successfully completed on Base Sepolia.`);
+      refetchVaultBalance();
+      setActionStatus(`Withdrawal confirmed! Tx: ${data.txHash.slice(0, 10)}...${data.txHash.slice(-8)}`);
       setWithdrawAmount('');
-    }, 1500);
+    } catch (err: any) {
+      setActionStatus(`Withdrawal dispatch failed: ${err.message}`);
+    } finally {
+      setIsProcessingVaultTx(false);
+    }
   };
 
-  const handleBorrow = () => {
+  const handleBorrow = async () => {
     if (!isConnected) return alert('Please connect your wallet first!');
     const amount = Number(borrowAmount);
     if (!borrowAmount || amount <= 0) return alert('Enter a valid borrow amount');
@@ -214,8 +234,23 @@ export default function Home() {
       return alert(`Action Blocked: Max borrow limit exceeded. Available capacity: ${Math.max(0, maxBorrowCapacity).toFixed(4)} USDC equivalent.`);
     }
 
-    setActionStatus(`Processing borrow for ${borrowAmount} USDC... Vault liquidity verified by AI CFO.`);
-    setTimeout(() => {
+    setIsProcessingVaultTx(true);
+    setActionStatus(`AI CFO approving liquidity payout: Vault sending ${borrowAmount} USDC equivalent to your wallet...`);
+
+    try {
+      const res = await fetch('/api/vault-transfer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userAddress,
+          amount: borrowAmount,
+          actionType: 'borrow',
+        }),
+      });
+
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
       setUserBalances((prev) => ({
         ...prev,
         [selectedAsset]: {
@@ -223,9 +258,15 @@ export default function Home() {
           borrowed: prev[selectedAsset].borrowed + amount,
         },
       }));
-      setActionStatus(`Borrow for ${borrowAmount} USDC successfully executed on Base Sepolia.`);
+
+      refetchVaultBalance();
+      setActionStatus(`Borrow payout confirmed! Tx: ${data.txHash.slice(0, 10)}...${data.txHash.slice(-8)}`);
       setBorrowAmount('');
-    }, 1500);
+    } catch (err: any) {
+      setActionStatus(`Borrow payout failed: ${err.message}`);
+    } finally {
+      setIsProcessingVaultTx(false);
+    }
   };
 
   const handleRepay = () => {
@@ -241,8 +282,13 @@ export default function Home() {
       return alert(`Repayment amount exceeds outstanding debt of ${currentPosition.borrowed.toFixed(4)} USDC.`);
     }
 
-    setActionStatus(`Processing repayment of ${repayAmount} USDC to vault...`);
-    setTimeout(() => {
+    try {
+      setActionStatus(`Submitting debt repayment of ${repayAmount} USDC to Vault...`);
+      sendTransaction({
+        to: PROTOCOL_VAULT_ADDRESS,
+        value: parseEther((amount * 0.0001).toFixed(6)),
+      });
+
       setUserBalances((prev) => ({
         ...prev,
         [selectedAsset]: {
@@ -250,9 +296,10 @@ export default function Home() {
           borrowed: Math.max(0, prev[selectedAsset].borrowed - amount),
         },
       }));
-      setActionStatus(`Repayment of ${repayAmount} USDC successful. Health Factor restored.`);
       setRepayAmount('');
-    }, 1500);
+    } catch (e: any) {
+      setActionStatus(`Repayment failed: ${e.message}`);
+    }
   };
 
   const runSentinelAudit = async (role: 'CRO' | 'CFO' | 'COO' | 'CTO') => {
@@ -490,7 +537,7 @@ export default function Home() {
                 <div className="bg-slate-950/40 border border-slate-800/80 p-4 rounded-xl space-y-3">
                   <div className="flex justify-between text-xs text-slate-400">
                     <span>Withdraw Collateral ({activeAsset.name})</span>
-                    <span className="text-slate-400">Available to withdraw: {currentPosition.deposited} {activeAsset.name}</span>
+                    <span className="text-slate-400">Available: {currentPosition.deposited} {activeAsset.name}</span>
                   </div>
                   <div className="flex gap-2">
                     <input
@@ -502,9 +549,10 @@ export default function Home() {
                     />
                     <button
                       onClick={handleWithdraw}
-                      className="px-5 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-lg font-medium text-xs transition shrink-0 cursor-pointer"
+                      disabled={isProcessingVaultTx}
+                      className="px-5 py-2 bg-rose-600 hover:bg-rose-500 disabled:bg-slate-800 text-white rounded-lg font-medium text-xs transition shrink-0 cursor-pointer"
                     >
-                      Withdraw {activeAsset.name}
+                      {isProcessingVaultTx ? 'Transferring...' : `Withdraw ${activeAsset.name}`}
                     </button>
                   </div>
                 </div>
@@ -529,9 +577,10 @@ export default function Home() {
                     />
                     <button
                       onClick={handleBorrow}
-                      className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium text-xs transition shrink-0 cursor-pointer"
+                      disabled={isProcessingVaultTx}
+                      className="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:bg-slate-800 text-white rounded-lg font-medium text-xs transition shrink-0 cursor-pointer"
                     >
-                      Borrow USDC
+                      {isProcessingVaultTx ? 'Disbursing...' : 'Borrow USDC'}
                     </button>
                   </div>
                 </div>
@@ -556,9 +605,10 @@ export default function Home() {
                     />
                     <button
                       onClick={handleRepay}
-                      className="px-5 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg font-medium text-xs transition shrink-0 cursor-pointer"
+                      disabled={isTxPending || isTxConfirming}
+                      className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 text-white rounded-lg font-medium text-xs transition shrink-0 cursor-pointer"
                     >
-                      Repay Debt
+                      {isTxPending ? 'Signing...' : isTxConfirming ? 'Confirming...' : 'Repay Debt'}
                     </button>
                   </div>
                 </div>
@@ -567,7 +617,7 @@ export default function Home() {
               {/* Status Activity Bar */}
               {actionStatus && (
                 <div className="p-3 bg-blue-950/30 border border-blue-800/50 rounded-xl text-xs text-blue-300 font-mono">
-                  {actionStatus} {isTxSuccess && '— On-Chain Transaction Confirmed!'}
+                  {actionStatus} {isTxSuccess && '— Transaction Confirmed on Base Sepolia!'}
                 </div>
               )}
             </div>
