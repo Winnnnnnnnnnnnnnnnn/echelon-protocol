@@ -5,6 +5,9 @@ import { Providers } from './providers';
 export const metadata: Metadata = {
   title: 'Echelon Protocol | AI-Powered DeFi Lending',
   description: 'Autonomous multi-agent risk sentinel on Base',
+  icons: {
+    icon: '/icon-removebg-preview.svg',
+  },
 };
 
 export default function RootLayout({

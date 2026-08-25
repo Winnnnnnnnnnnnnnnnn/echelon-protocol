@@ -1,5 +1,6 @@
 'use client';
 import { useState, useEffect, useMemo } from 'react';
+import Image from 'next/image';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useBalance, useSendTransaction, useWaitForTransactionReceipt } from 'wagmi';
 import { baseSepolia } from 'wagmi/chains';
@@ -452,18 +453,28 @@ export default function Home() {
     <main className="min-h-screen bg-slate-950 text-slate-100 p-6 md:p-10 font-sans">
       {/* Top Header */}
       <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4 border-b border-slate-800/80 pb-6">
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-3xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-400 to-teal-400">
-              ECHELON PROTOCOL
-            </h1>
-            <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
-              Base Sepolia
-            </span>
+        <div className="flex items-center gap-3.5">
+          <Image
+            src="/icon-removebg-preview.svg"
+            alt="Echelon Protocol Logo"
+            width={44}
+            height={44}
+            className="h-11 w-11 object-contain drop-shadow-[0_0_12px_rgba(37,99,235,0.45)]"
+            priority
+          />
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-400 to-teal-400">
+                ECHELON PROTOCOL
+              </h1>
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                Base Sepolia
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 mt-1 font-mono">
+              Autonomous Multi-Asset Lending Sentinel (Standard, LRT & RWA Protected) • Base Gas: <span className="text-cyan-400">{liveGasGwei}</span>
+            </p>
           </div>
-          <p className="text-xs text-slate-400 mt-1 font-mono">
-            Autonomous Multi-Asset Lending Sentinel (Standard, LRT & RWA Protected) • Base Gas: <span className="text-cyan-400">{liveGasGwei}</span>
-          </p>
         </div>
         <div className="flex items-center gap-3">
           <button
