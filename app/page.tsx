@@ -105,7 +105,7 @@ export default function Home() {
     try {
       setActionStatus(`Submitting deposit for ${depositAmount} ${activeAsset.name} to Base Sepolia...`);
       sendTransaction({
-        to: '0x000000000000000000000000000000000000dEaD',
+        to: '0xC95DDE4889e05d261618fD33baC37011C5a307D4',
         value: parseEther((amount * 0.0001).toFixed(6)),
       });
 
