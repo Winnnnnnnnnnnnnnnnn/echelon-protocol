@@ -455,12 +455,13 @@ export default function Home() {
       <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4 border-b border-slate-800/80 pb-6">
         <div className="flex items-center gap-3.5">
           <Image
-            src="/icon-removebg-preview.svg"
-            alt="Echelon Protocol Logo"
-            width={44}
-            height={44}
-            className="h-11 w-11 object-contain drop-shadow-[0_0_12px_rgba(37,99,235,0.45)]"
+            src="/logo.png"
+            alt="Echelon Logo"
+            width={40}
+            height={40}
+            className="h-10 w-10 object-contain"
             priority
+            unoptimized
           />
           <div>
             <div className="flex items-center gap-2">
