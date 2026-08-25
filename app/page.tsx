@@ -1,37 +1,39 @@
 'use client';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useBalance, useSendTransaction, useWaitForTransactionReceipt } from 'wagmi';
 import { baseSepolia } from 'wagmi/chains';
-import { parseEther } from 'viem';
+import { parseEther, createPublicClient, http, formatGwei } from 'viem';
 
 const PROTOCOL_VAULT_ADDRESS = '0xC95DDE4889e05d261618fD33baC37011C5a307D4' as `0x${string}`;
 
 type AssetType = 'WETH' | 'ezETH' | 'USDY';
 
-interface AssetConfig {
+interface AssetStaticConfig {
   name: string;
   type: string;
   category: 'Standard' | 'LRT' | 'RWA';
   unit: string;
-  borrowAPY: string;
-  healthFactor: string;
+  baseAPY: number;      // Base rate (e.g. 2.0%)
+  multiplier: number;   // Utilization slope (e.g. 8.0%)
   maxLTV: string;
   ltvFactor: number;
+  liquidationThreshold: number;
   oracleDeviation: string;
   riskNote: string;
 }
 
-const ASSET_DATA: Record<AssetType, AssetConfig> = {
+const ASSET_CONFIGS: Record<AssetType, AssetStaticConfig> = {
   WETH: {
     name: 'WETH',
     type: 'Wrapped Ethereum',
     category: 'Standard',
     unit: 'ETH',
-    borrowAPY: '3.45%',
-    healthFactor: '1.85 (Safe)',
+    baseAPY: 2.10,
+    multiplier: 6.50,
     maxLTV: '80%',
     ltvFactor: 0.80,
+    liquidationThreshold: 0.85,
     oracleDeviation: '0.01%',
     riskNote: 'Standard native collateral. Deep DEX liquidity on Base.',
   },
@@ -40,10 +42,11 @@ const ASSET_DATA: Record<AssetType, AssetConfig> = {
     type: 'Renzo Restaked ETH',
     category: 'LRT',
     unit: 'ezETH',
-    borrowAPY: '5.12%',
-    healthFactor: '1.62 (Moderate)',
+    baseAPY: 3.50,
+    multiplier: 8.00,
     maxLTV: '75%',
     ltvFactor: 0.75,
+    liquidationThreshold: 0.80,
     oracleDeviation: '0.42%',
     riskNote: 'LRT peg deviation watchdog active. Slashing telemetry synced.',
   },
@@ -52,10 +55,11 @@ const ASSET_DATA: Record<AssetType, AssetConfig> = {
     type: 'Ondo US Dollar Yield',
     category: 'RWA',
     unit: 'USDY',
-    borrowAPY: '4.80%',
-    healthFactor: '2.10 (Ultra Safe)',
+    baseAPY: 4.20,
+    multiplier: 4.00,
     maxLTV: '85%',
     ltvFactor: 0.85,
+    liquidationThreshold: 0.90,
     oracleDeviation: '0.03%',
     riskNote: 'TradFi Treasury backing verified via off-chain Proof of Reserve.',
   },
@@ -71,12 +75,13 @@ export default function Home() {
   const [borrowAmount, setBorrowAmount] = useState('');
   const [repayAmount, setRepayAmount] = useState('');
   const [isProcessingVaultTx, setIsProcessingVaultTx] = useState(false);
+  const [liveGasGwei, setLiveGasGwei] = useState<string>('0.005 Gwei');
 
-  // Dynamic Collateral State
-  const [poolCollaterals, setPoolCollaterals] = useState<Record<AssetType, number>>({
-    WETH: 145.50,
-    ezETH: 320.80,
-    USDY: 850000,
+  // Pool state (Total Deposited & Total Borrowed across all protocol users)
+  const [poolState, setPoolState] = useState<Record<AssetType, { deposited: number; borrowed: number }>>({
+    WETH: { deposited: 145.50, borrowed: 48.20 },
+    ezETH: { deposited: 320.80, borrowed: 112.40 },
+    USDY: { deposited: 850000, borrowed: 340000 },
   });
   
   // User Positions per Asset
@@ -93,6 +98,7 @@ export default function Home() {
   const { data: hash, sendTransaction, isPending: isTxPending } = useSendTransaction();
   const { isLoading: isTxConfirming, isSuccess: isTxSuccess } = useWaitForTransactionReceipt({ hash });
 
+  // On-Chain Realtime Native Vault Balance
   const { data: vaultBalanceData, isLoading: isVaultLoading, refetch: refetchVaultBalance } = useBalance({
     address: PROTOCOL_VAULT_ADDRESS,
     chainId: baseSepolia.id,
@@ -105,8 +111,24 @@ export default function Home() {
     CTO: 'Circuit breaker & oracle watchdog on standby.',
   });
 
+  // Fetch Live Base Sepolia Gas
   useEffect(() => {
     setMounted(true);
+    const fetchGas = async () => {
+      try {
+        const client = createPublicClient({
+          chain: baseSepolia,
+          transport: http('https://sepolia.base.org'),
+        });
+        const gasPrice = await client.getGasPrice();
+        setLiveGasGwei(`${Number(formatGwei(gasPrice)).toFixed(4)} Gwei`);
+      } catch (e) {
+        setLiveGasGwei('0.005 Gwei');
+      }
+    };
+    fetchGas();
+    const interval = setInterval(fetchGas, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -115,33 +137,63 @@ export default function Home() {
     }
   }, [isTxSuccess, refetchVaultBalance]);
 
-  const activeAsset = ASSET_DATA[selectedAsset];
+  const activeConfig = ASSET_CONFIGS[selectedAsset];
+  const currentPool = poolState[selectedAsset];
   const currentPosition = userBalances[selectedAsset];
-  const maxBorrowCapacity = (currentPosition.deposited * activeAsset.ltvFactor) - currentPosition.borrowed;
+
+  // REAL-TIME METRICS COMPUTATION
+  const realTimePoolDeposited = useMemo(() => {
+    if (selectedAsset === 'WETH' && vaultBalanceData) {
+      return Number(vaultBalanceData.formatted);
+    }
+    return currentPool.deposited;
+  }, [selectedAsset, vaultBalanceData, currentPool.deposited]);
+
+  // Dynamic APY based on pool utilization rate: APY = Base + (Utilization * Slope)
+  const dynamicBorrowAPY = useMemo(() => {
+    if (realTimePoolDeposited <= 0) return `${activeConfig.baseAPY.toFixed(2)}%`;
+    const utilization = Math.min(1, currentPool.borrowed / realTimePoolDeposited);
+    const calculatedAPY = activeConfig.baseAPY + (utilization * activeConfig.multiplier);
+    return `${calculatedAPY.toFixed(2)}%`;
+  }, [activeConfig, currentPool.borrowed, realTimePoolDeposited]);
+
+  // Dynamic Health Factor calculation
+  const dynamicHealthFactor = useMemo(() => {
+    if (currentPosition.borrowed <= 0) return { score: '∞ (Safe)', status: 'Safe', color: 'text-blue-400' };
+    
+    // Collateral value eligible for debt backing
+    const maxBorrowableDebt = currentPosition.deposited * activeConfig.ltvFactor;
+    const hf = maxBorrowableDebt / currentPosition.borrowed;
+
+    if (hf >= 1.5) return { score: `${hf.toFixed(2)} (Safe)`, status: 'Safe', color: 'text-emerald-400' };
+    if (hf >= 1.1) return { score: `${hf.toFixed(2)} (Moderate)`, status: 'Moderate', color: 'text-amber-400' };
+    return { score: `${hf.toFixed(2)} (Liquidation Risk)`, status: 'Danger', color: 'text-rose-400' };
+  }, [currentPosition, activeConfig]);
+
+  const maxBorrowCapacity = (currentPosition.deposited * activeConfig.ltvFactor) - currentPosition.borrowed;
 
   const formatPoolDisplay = (asset: AssetType) => {
     if (asset === 'WETH') {
       if (isVaultLoading) return 'Syncing RPC...';
       if (vaultBalanceData) {
-        const liveEth = Number(vaultBalanceData.formatted);
-        return `${liveEth.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 })} ETH`;
+        return `${Number(vaultBalanceData.formatted).toFixed(4)} ETH`;
       }
     }
-
-    const val = poolCollaterals[asset];
+    const val = poolState[asset].deposited;
     if (asset === 'USDY') {
-      return `$${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDY`;
+      return `$${val.toLocaleString('en-US', { minimumFractionDigits: 2 })} USDY`;
     }
-    return `${val.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${activeAsset.unit}`;
+    return `${val.toLocaleString('en-US', { minimumFractionDigits: 2 })} ${ASSET_CONFIGS[asset].unit}`;
   };
 
+  // EXECUTION HANDLERS
   const handleDeposit = () => {
     if (!isConnected) return alert('Please connect your wallet first!');
     const amount = Number(depositAmount);
     if (!depositAmount || amount <= 0) return alert('Enter a valid deposit amount');
 
     try {
-      setActionStatus(`Submitting deposit for ${depositAmount} ${activeAsset.name} to Vault on Base Sepolia...`);
+      setActionStatus(`Submitting deposit for ${depositAmount} ${activeConfig.name} to Vault on Base Sepolia...`);
       sendTransaction({
         to: PROTOCOL_VAULT_ADDRESS,
         value: parseEther((amount * 0.0001).toFixed(6)),
@@ -155,9 +207,12 @@ export default function Home() {
         },
       }));
 
-      setPoolCollaterals((prev) => ({
+      setPoolState((prev) => ({
         ...prev,
-        [selectedAsset]: prev[selectedAsset] + amount,
+        [selectedAsset]: {
+          ...prev[selectedAsset],
+          deposited: prev[selectedAsset].deposited + amount,
+        },
       }));
 
       setDepositAmount('');
@@ -172,17 +227,17 @@ export default function Home() {
     if (!withdrawAmount || amount <= 0) return alert('Enter a valid withdrawal amount');
 
     if (amount > currentPosition.deposited) {
-      return alert(`Insufficient deposit balance. You only deposited ${currentPosition.deposited} ${activeAsset.name}.`);
+      return alert(`Insufficient balance. You only deposited ${currentPosition.deposited} ${activeConfig.name}.`);
     }
 
     const remainingDeposit = currentPosition.deposited - amount;
-    const requiredDepositForDebt = currentPosition.borrowed / activeAsset.ltvFactor;
-    if (remainingDeposit < requiredDepositForDebt) {
-      return alert(`Action Blocked by AI CRO: Withdrawal would cause instant liquidation. Repay your debt first.`);
+    const requiredDepositForDebt = currentPosition.borrowed / activeConfig.ltvFactor;
+    if (currentPosition.borrowed > 0 && remainingDeposit < requiredDepositForDebt) {
+      return alert(`Action Blocked by AI CRO: Health Factor would drop below liquidation threshold. Repay debt first.`);
     }
 
     setIsProcessingVaultTx(true);
-    setActionStatus(`Initiating vault transfer: Sending ${withdrawAmount} ${activeAsset.name} back to your wallet...`);
+    setActionStatus(`Initiating vault transfer: Sending ${withdrawAmount} ${activeConfig.name} back to your wallet...`);
 
     try {
       const res = await fetch('/api/vault-transfer', {
@@ -206,9 +261,12 @@ export default function Home() {
         },
       }));
 
-      setPoolCollaterals((prev) => ({
+      setPoolState((prev) => ({
         ...prev,
-        [selectedAsset]: Math.max(0, prev[selectedAsset] - amount),
+        [selectedAsset]: {
+          ...prev[selectedAsset],
+          deposited: Math.max(0, prev[selectedAsset].deposited - amount),
+        },
       }));
 
       refetchVaultBalance();
@@ -227,7 +285,7 @@ export default function Home() {
     if (!borrowAmount || amount <= 0) return alert('Enter a valid borrow amount');
 
     if (currentPosition.deposited <= 0) {
-      return alert(`Action Denied: You must deposit ${activeAsset.name} collateral before borrowing.`);
+      return alert(`Action Denied: You must deposit ${activeConfig.name} collateral before borrowing.`);
     }
 
     if (amount > maxBorrowCapacity) {
@@ -235,7 +293,7 @@ export default function Home() {
     }
 
     setIsProcessingVaultTx(true);
-    setActionStatus(`AI CFO approving liquidity payout: Vault sending ${borrowAmount} USDC equivalent to your wallet...`);
+    setActionStatus(`AI CFO approving liquidity payout: Vault sending ${borrowAmount} USDC to your wallet...`);
 
     try {
       const res = await fetch('/api/vault-transfer', {
@@ -259,6 +317,14 @@ export default function Home() {
         },
       }));
 
+      setPoolState((prev) => ({
+        ...prev,
+        [selectedAsset]: {
+          ...prev[selectedAsset],
+          borrowed: prev[selectedAsset].borrowed + amount,
+        },
+      }));
+
       refetchVaultBalance();
       setActionStatus(`Borrow payout confirmed! Tx: ${data.txHash.slice(0, 10)}...${data.txHash.slice(-8)}`);
       setBorrowAmount('');
@@ -275,7 +341,7 @@ export default function Home() {
     if (!repayAmount || amount <= 0) return alert('Enter a valid repayment amount');
 
     if (currentPosition.borrowed <= 0) {
-      return alert(`Action Denied: You have no active debt to repay for ${activeAsset.name} vault.`);
+      return alert(`Action Denied: You have no active debt to repay for ${activeConfig.name} vault.`);
     }
 
     if (amount > currentPosition.borrowed) {
@@ -296,6 +362,15 @@ export default function Home() {
           borrowed: Math.max(0, prev[selectedAsset].borrowed - amount),
         },
       }));
+
+      setPoolState((prev) => ({
+        ...prev,
+        [selectedAsset]: {
+          ...prev[selectedAsset],
+          borrowed: Math.max(0, prev[selectedAsset].borrowed - amount),
+        },
+      }));
+
       setRepayAmount('');
     } catch (e: any) {
       setActionStatus(`Repayment failed: ${e.message}`);
@@ -306,17 +381,17 @@ export default function Home() {
     setLoadingRole(role);
     try {
       const vaultData = {
-        asset: activeAsset.name,
-        category: activeAsset.category,
+        asset: activeConfig.name,
+        category: activeConfig.category,
         totalDeposited: formatPoolDisplay(selectedAsset),
-        borrowAPY: activeAsset.borrowAPY,
-        healthFactor: activeAsset.healthFactor,
-        maxLTV: activeAsset.maxLTV,
-        oracleDeviation: activeAsset.oracleDeviation,
-        baseGasGwei: '0.005 Gwei',
-        riskContext: activeAsset.riskNote,
-        userDeposited: `${currentPosition.deposited} ${activeAsset.name}`,
-        userBorrowed: `${currentPosition.borrowed} USDC`,
+        borrowAPY: dynamicBorrowAPY,
+        healthFactor: dynamicHealthFactor.score,
+        maxLTV: activeConfig.maxLTV,
+        oracleDeviation: activeConfig.oracleDeviation,
+        baseGasGwei: liveGasGwei,
+        riskContext: activeConfig.riskNote,
+        userDeposited: `${currentPosition.deposited} ${activeConfig.name}`,
+        userBorrowed: `${currentPosition.borrowed.toFixed(2)} USDC`,
       };
 
       const res = await fetch('/api/sentinel', {
@@ -361,7 +436,7 @@ export default function Home() {
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-1 font-mono">
-            Autonomous Multi-Asset Lending Sentinel (Standard, LRT & RWA Protected)
+            Autonomous Multi-Asset Lending Sentinel (Standard, LRT & RWA Protected) • Base Gas: <span className="text-cyan-400">{liveGasGwei}</span>
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -378,7 +453,7 @@ export default function Home() {
       {/* Asset Selector Tabs */}
       <div className="max-w-6xl mx-auto mb-6 flex items-center gap-3 overflow-x-auto pb-2">
         {(['WETH', 'ezETH', 'USDY'] as AssetType[]).map((assetKey) => {
-          const item = ASSET_DATA[assetKey];
+          const item = ASSET_CONFIGS[assetKey];
           const isSelected = selectedAsset === assetKey;
           return (
             <button
@@ -417,10 +492,10 @@ export default function Home() {
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-md">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-lg font-semibold text-slate-200">
-                {activeAsset.name} Vault Overview
+                {activeConfig.name} Vault Overview
               </h2>
               <span className="text-xs text-slate-400 font-mono">
-                {activeAsset.type}
+                {activeConfig.type}
               </span>
             </div>
 
@@ -428,21 +503,21 @@ export default function Home() {
               <div className="bg-slate-950/60 border border-slate-800/60 p-3.5 rounded-xl">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-slate-400">Total Pool Collateral</span>
-                  {selectedAsset === 'WETH' && (
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Live On-Chain RPC"></span>
-                  )}
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Real-time Reactive"></span>
                 </div>
                 <p className="text-lg font-bold text-white mt-1 font-mono">
                   {formatPoolDisplay(selectedAsset)}
                 </p>
               </div>
               <div className="bg-slate-950/60 border border-slate-800/60 p-3.5 rounded-xl">
-                <span className="text-xs text-slate-400">Borrow APY</span>
-                <p className="text-lg font-bold text-emerald-400 mt-1 font-mono">{activeAsset.borrowAPY}</p>
+                <span className="text-xs text-slate-400">Borrow APY (Dynamic)</span>
+                <p className="text-lg font-bold text-emerald-400 mt-1 font-mono">{dynamicBorrowAPY}</p>
               </div>
               <div className="bg-slate-950/60 border border-slate-800/60 p-3.5 rounded-xl">
                 <span className="text-xs text-slate-400">Health Factor</span>
-                <p className="text-lg font-bold text-blue-400 mt-1 font-mono">{activeAsset.healthFactor}</p>
+                <p className={`text-lg font-bold mt-1 font-mono ${dynamicHealthFactor.color}`}>
+                  {dynamicHealthFactor.score}
+                </p>
               </div>
             </div>
 
@@ -450,7 +525,7 @@ export default function Home() {
             <div className="mt-4 p-3 bg-slate-950/70 border border-slate-800 rounded-xl grid grid-cols-2 gap-3 text-xs">
               <div>
                 <span className="text-slate-400">Your Deposited Collateral:</span>
-                <p className="text-sm font-semibold text-white font-mono mt-0.5">{currentPosition.deposited} {activeAsset.name}</p>
+                <p className="text-sm font-semibold text-white font-mono mt-0.5">{currentPosition.deposited} {activeConfig.name}</p>
               </div>
               <div>
                 <span className="text-slate-400">Your Active Debt:</span>
@@ -460,7 +535,7 @@ export default function Home() {
 
             <div className="mt-3 p-3 bg-slate-950/40 border border-slate-800/80 rounded-xl flex items-center justify-between text-xs">
               <span className="text-slate-400">Sentinel Watchdog Status:</span>
-              <span className="text-slate-300 font-mono">{activeAsset.riskNote}</span>
+              <span className="text-slate-300 font-mono">{activeConfig.riskNote}</span>
             </div>
           </div>
 
@@ -510,8 +585,8 @@ export default function Home() {
               {activeTab === 'deposit' && (
                 <div className="bg-slate-950/40 border border-slate-800/80 p-4 rounded-xl space-y-3">
                   <div className="flex justify-between text-xs text-slate-400">
-                    <span>Deposit Collateral ({activeAsset.name})</span>
-                    <span>Max LTV: {activeAsset.maxLTV}</span>
+                    <span>Deposit Collateral ({activeConfig.name})</span>
+                    <span>Max LTV: {activeConfig.maxLTV}</span>
                   </div>
                   <div className="flex gap-2">
                     <input
@@ -526,7 +601,7 @@ export default function Home() {
                       disabled={isTxPending || isTxConfirming}
                       className="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white rounded-lg font-medium text-xs transition shrink-0 cursor-pointer"
                     >
-                      {isTxPending ? 'Signing...' : isTxConfirming ? 'Confirming...' : `Deposit ${activeAsset.name}`}
+                      {isTxPending ? 'Signing...' : isTxConfirming ? 'Confirming...' : `Deposit ${activeConfig.name}`}
                     </button>
                   </div>
                 </div>
@@ -536,8 +611,8 @@ export default function Home() {
               {activeTab === 'withdraw' && (
                 <div className="bg-slate-950/40 border border-slate-800/80 p-4 rounded-xl space-y-3">
                   <div className="flex justify-between text-xs text-slate-400">
-                    <span>Withdraw Collateral ({activeAsset.name})</span>
-                    <span className="text-slate-400">Available: {currentPosition.deposited} {activeAsset.name}</span>
+                    <span>Withdraw Collateral ({activeConfig.name})</span>
+                    <span className="text-slate-400">Available: {currentPosition.deposited} {activeConfig.name}</span>
                   </div>
                   <div className="flex gap-2">
                     <input
@@ -552,7 +627,7 @@ export default function Home() {
                       disabled={isProcessingVaultTx}
                       className="px-5 py-2 bg-rose-600 hover:bg-rose-500 disabled:bg-slate-800 text-white rounded-lg font-medium text-xs transition shrink-0 cursor-pointer"
                     >
-                      {isProcessingVaultTx ? 'Transferring...' : `Withdraw ${activeAsset.name}`}
+                      {isProcessingVaultTx ? 'Transferring...' : `Withdraw ${activeConfig.name}`}
                     </button>
                   </div>
                 </div>
