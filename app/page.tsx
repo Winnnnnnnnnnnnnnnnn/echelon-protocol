@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useBalance, useSendTransaction, useWaitForTransactionReceipt } from 'wagmi';
+import { baseSepolia } from 'wagmi/chains';
 import { parseEther } from 'viem';
 
 const PROTOCOL_VAULT_ADDRESS = '0xC95DDE4889e05d261618fD33baC37011C5a307D4' as `0x${string}`;
@@ -92,8 +93,9 @@ export default function Home() {
   const { isLoading: isTxConfirming, isSuccess: isTxSuccess } = useWaitForTransactionReceipt({ hash });
 
   // On-Chain Realtime Balance of Protocol Vault on Base Sepolia
-  const { data: vaultBalanceData, refetch: refetchVaultBalance } = useBalance({
+  const { data: vaultBalanceData, isLoading: isVaultLoading, refetch: refetchVaultBalance } = useBalance({
     address: PROTOCOL_VAULT_ADDRESS,
+    chainId: baseSepolia.id,
   });
 
   const [telemetryData, setTelemetryData] = useState<{ [key: string]: string }>({
@@ -118,9 +120,12 @@ export default function Home() {
   const maxBorrowCapacity = (currentPosition.deposited * activeAsset.ltvFactor) - currentPosition.borrowed;
 
   const formatPoolDisplay = (asset: AssetType) => {
-    if (asset === 'WETH' && vaultBalanceData) {
-      const liveEth = Number(vaultBalanceData.formatted);
-      return `${liveEth.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 })} ETH (Live)`;
+    if (asset === 'WETH') {
+      if (isVaultLoading) return 'Syncing RPC...';
+      if (vaultBalanceData) {
+        const liveEth = Number(vaultBalanceData.formatted);
+        return `${liveEth.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 6 })} ETH`;
+      }
     }
 
     const val = poolCollaterals[asset];
@@ -377,7 +382,7 @@ export default function Home() {
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-slate-400">Total Pool Collateral</span>
                   {selectedAsset === 'WETH' && (
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Live On-Chain"></span>
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Live On-Chain RPC"></span>
                   )}
                 </div>
                 <p className="text-lg font-bold text-white mt-1 font-mono">
