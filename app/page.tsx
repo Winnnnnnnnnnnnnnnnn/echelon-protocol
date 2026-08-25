@@ -457,8 +457,8 @@ export default function Home() {
           <Image
             src="/logo.png"
             alt="Echelon Logo"
-            width={80}
-            height={80}
+            width={60}
+            height={60}
             className="h-10 w-10 object-contain"
             priority
             unoptimized
