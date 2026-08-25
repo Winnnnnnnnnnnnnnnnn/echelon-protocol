@@ -77,18 +77,34 @@ export default function Home() {
   const [isProcessingVaultTx, setIsProcessingVaultTx] = useState(false);
   const [liveGasGwei, setLiveGasGwei] = useState<string>('0.005 Gwei');
 
-  // Pool state (Total Deposited & Total Borrowed across all protocol users)
-  const [poolState, setPoolState] = useState<Record<AssetType, { deposited: number; borrowed: number }>>({
-    WETH: { deposited: 145.50, borrowed: 48.20 },
-    ezETH: { deposited: 320.80, borrowed: 112.40 },
-    USDY: { deposited: 850000, borrowed: 340000 },
+  // Persistent Pool State (Load from localStorage if available)
+  const [poolState, setPoolState] = useState<Record<AssetType, { deposited: number; borrowed: number }>>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('echelon_pool_state');
+      if (saved) {
+        try { return JSON.parse(saved); } catch (e) {}
+      }
+    }
+    return {
+      WETH: { deposited: 145.50, borrowed: 48.20 },
+      ezETH: { deposited: 320.80, borrowed: 112.40 },
+      USDY: { deposited: 850000, borrowed: 340000 },
+    };
   });
   
-  // User Positions per Asset
-  const [userBalances, setUserBalances] = useState<Record<AssetType, { deposited: number; borrowed: number }>>({
-    WETH: { deposited: 0, borrowed: 0 },
-    ezETH: { deposited: 0, borrowed: 0 },
-    USDY: { deposited: 0, borrowed: 0 },
+  // Persistent User Balances (Load from localStorage if available)
+  const [userBalances, setUserBalances] = useState<Record<AssetType, { deposited: number; borrowed: number }>>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('echelon_user_balances');
+      if (saved) {
+        try { return JSON.parse(saved); } catch (e) {}
+      }
+    }
+    return {
+      WETH: { deposited: 0, borrowed: 0 },
+      ezETH: { deposited: 0, borrowed: 0 },
+      USDY: { deposited: 0, borrowed: 0 },
+    };
   });
 
   const [loadingRole, setLoadingRole] = useState<string | null>(null);
@@ -111,9 +127,20 @@ export default function Home() {
     CTO: 'Circuit breaker & oracle watchdog on standby.',
   });
 
-  // Fetch Live Base Sepolia Gas
+  // Hydration fix & Save to localStorage
   useEffect(() => {
     setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (mounted) {
+      localStorage.setItem('echelon_pool_state', JSON.stringify(poolState));
+      localStorage.setItem('echelon_user_balances', JSON.stringify(userBalances));
+    }
+  }, [poolState, userBalances, mounted]);
+
+  // Fetch Live Base Sepolia Gas
+  useEffect(() => {
     const fetchGas = async () => {
       try {
         const client = createPublicClient({
@@ -161,7 +188,6 @@ export default function Home() {
   const dynamicHealthFactor = useMemo(() => {
     if (currentPosition.borrowed <= 0) return { score: '∞ (Safe)', status: 'Safe', color: 'text-blue-400' };
     
-    // Collateral value eligible for debt backing
     const maxBorrowableDebt = currentPosition.deposited * activeConfig.ltvFactor;
     const hf = maxBorrowableDebt / currentPosition.borrowed;
 
