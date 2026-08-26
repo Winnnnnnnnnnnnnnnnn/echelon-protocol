@@ -43,7 +43,43 @@
 │  • Base Sepolia Settlement   │  │  • AI CTO (Circuit Sentinel) │
 └──────────────────────────────┘  └──────────────────────────────┘
 
+---
 
+🚀 Deployed Contracts & Live Demo
+Live dApp: https://echelon-protocol.vercel.app
+
+Network: Base Sepolia Testnet
+
+Chain ID: 84532
+
+💻 Tech Stack
+Frontend: Next.js 14, React, TypeScript, Tailwind CSS, Lucide Icons
+
+Web3 Integration: Wagmi, Viem, RainbowKit
+
+Smart Contracts: Solidity, Base Sepolia
+
+AI & Off-Chain Intelligence: Next.js Serverless Routes, LLM-driven telemetry parsing
+
+🛠️ Getting Started Locally
+1. Clone Repository
+Bash
+git clone [https://github.com/vldnnnmnnnnnnnmnn/echelon-protocol.git](https://github.com/vldnnnmnnnnnnnmnn/echelon-protocol.git)
+cd echelon-protocol
+2. Install Dependencies
+Bash
+npm install
+3. Run Development Server
+Bash
+npm run dev
+Open http://localhost:3000 on your browser.
+
+🗺️ Roadmap
+[x] Phase 1: Smart Vault Core Architecture on Base Sepolia
+
+[x] Phase 2: Autonomous C-Level AI Sentinel Telemetry Dashboard
+
+[ ] Phase 3: Automated On-Chain Circuit Breaker Triggered by AI Watchdogs
 
 [ ] Phase 4: Mainnet Deployment on Base & Liquidity Bootstrapping
 
