@@ -8,9 +8,6 @@ export const metadata: Metadata = {
   icons: {
     icon: '/icon-removebg-preview.svg',
   },
-  other: {
-    'base:app_id': '6a8f08e3600b1b49edbb62cb',
-  },
 };
 
 export default function RootLayout({
@@ -20,6 +17,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <meta name="base:app_id" content="6a8f08e3600b1b49edbb62cb" />
+      </head>
       <body className="bg-slate-950 text-slate-100 antialiased">
         <Providers>{children}</Providers>
       </body>
