@@ -8,6 +8,9 @@ export const metadata: Metadata = {
   icons: {
     icon: '/icon-removebg-preview.svg',
   },
+  other: {
+    'base:app_id': '6a8f08e3600b1b49edbb62cb',
+  },
 };
 
 export default function RootLayout({
