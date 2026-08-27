@@ -2,11 +2,49 @@
 import { useState, useEffect, useMemo } from 'react';
 import Image from 'next/image';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
-import { useAccount, useBalance, useSendTransaction, useWaitForTransactionReceipt } from 'wagmi';
+import { useAccount, useBalance, useSendTransaction, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';
 import { baseSepolia } from 'wagmi/chains';
 import { parseEther, createPublicClient, http, formatGwei } from 'viem';
 
 const PROTOCOL_VAULT_ADDRESS = '0xC95DDE4889e05d261618fD33baC37011C5a307D4' as `0x${string}`;
+
+export const MOCK_TOKENS = {
+  USDY: {
+    name: 'Ondo US Dollar Yield (Mock)',
+    symbol: 'MockUSDY',
+    address: '0x755694619e0FF3a9d7A22DfBD6d217Bd2B23fbEB' as `0x${string}`,
+    decimals: 18,
+  },
+  ezETH: {
+    name: 'Renzo Restaked ETH (Mock)',
+    symbol: 'MockezETH',
+    address: '0x67Ab9CC0aF17fAE4cabb74F1B5cEd5f910870fEc' as `0x${string}`,
+    decimals: 18,
+  },
+};
+
+const mockAssetABI = [
+  {
+    type: 'function',
+    name: 'mintFaucet',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'to', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [],
+  },
+  {
+    type: 'function',
+    name: 'approve',
+    stateMutability: 'nonpayable',
+    inputs: [
+      { name: 'spender', type: 'address' },
+      { name: 'amount', type: 'uint256' },
+    ],
+    outputs: [{ name: '', type: 'bool' }],
+  },
+] as const;
 
 type AssetType = 'WETH' | 'ezETH' | 'USDY';
 
@@ -15,8 +53,9 @@ interface AssetStaticConfig {
   type: string;
   category: 'Standard' | 'LRT' | 'RWA';
   unit: string;
-  baseAPY: number;      // Base rate (e.g. 2.0%)
-  multiplier: number;   // Utilization slope (e.g. 8.0%)
+  contractAddress?: `0x${string}`;
+  baseAPY: number;
+  multiplier: number;
   maxLTV: string;
   ltvFactor: number;
   liquidationThreshold: number;
@@ -40,9 +79,10 @@ const ASSET_CONFIGS: Record<AssetType, AssetStaticConfig> = {
   },
   ezETH: {
     name: 'ezETH',
-    type: 'Renzo Restaked ETH',
+    type: 'Renzo Restaked ETH (Mock Token)',
     category: 'LRT',
     unit: 'ezETH',
+    contractAddress: MOCK_TOKENS.ezETH.address,
     baseAPY: 3.50,
     multiplier: 8.00,
     maxLTV: '75%',
@@ -53,9 +93,10 @@ const ASSET_CONFIGS: Record<AssetType, AssetStaticConfig> = {
   },
   USDY: {
     name: 'USDY',
-    type: 'Ondo US Dollar Yield',
+    type: 'Ondo US Dollar Yield (Mock Token)',
     category: 'RWA',
     unit: 'USDY',
+    contractAddress: MOCK_TOKENS.USDY.address,
     baseAPY: 4.20,
     multiplier: 4.00,
     maxLTV: '85%',
@@ -78,7 +119,6 @@ export default function Home() {
   const [isProcessingVaultTx, setIsProcessingVaultTx] = useState(false);
   const [liveGasGwei, setLiveGasGwei] = useState<string>('0.005 Gwei');
 
-  // Persistent Pool State (Load from localStorage if available)
   const [poolState, setPoolState] = useState<Record<AssetType, { deposited: number; borrowed: number }>>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('echelon_pool_state');
@@ -93,7 +133,6 @@ export default function Home() {
     };
   });
   
-  // Persistent User Balances (Load from localStorage if available)
   const [userBalances, setUserBalances] = useState<Record<AssetType, { deposited: number; borrowed: number }>>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('echelon_user_balances');
@@ -112,10 +151,14 @@ export default function Home() {
   const [actionStatus, setActionStatus] = useState<string | null>(null);
 
   const { address: userAddress, isConnected } = useAccount();
+  
+  // Native Gas Transaction
   const { data: hash, sendTransaction, isPending: isTxPending } = useSendTransaction();
   const { isLoading: isTxConfirming, isSuccess: isTxSuccess } = useWaitForTransactionReceipt({ hash });
 
-  // On-Chain Realtime Native Vault Balance
+  // ERC-20 Mock Contract Interaction
+  const { writeContractAsync, isPending: isContractPending } = useWriteContract();
+
   const { data: vaultBalanceData, isLoading: isVaultLoading, refetch: refetchVaultBalance } = useBalance({
     address: PROTOCOL_VAULT_ADDRESS,
     chainId: baseSepolia.id,
@@ -128,7 +171,6 @@ export default function Home() {
     CTO: 'Circuit breaker & oracle watchdog on standby.',
   });
 
-  // Hydration fix & Save to localStorage
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -140,7 +182,6 @@ export default function Home() {
     }
   }, [poolState, userBalances, mounted]);
 
-  // Fetch Live Base Sepolia Gas
   useEffect(() => {
     const fetchGas = async () => {
       try {
@@ -169,7 +210,6 @@ export default function Home() {
   const currentPool = poolState[selectedAsset];
   const currentPosition = userBalances[selectedAsset];
 
-  // REAL-TIME METRICS COMPUTATION
   const realTimePoolDeposited = useMemo(() => {
     if (selectedAsset === 'WETH' && vaultBalanceData) {
       return Number(vaultBalanceData.formatted);
@@ -177,7 +217,6 @@ export default function Home() {
     return currentPool.deposited;
   }, [selectedAsset, vaultBalanceData, currentPool.deposited]);
 
-  // Dynamic APY based on pool utilization rate: APY = Base + (Utilization * Slope)
   const dynamicBorrowAPY = useMemo(() => {
     if (realTimePoolDeposited <= 0) return `${activeConfig.baseAPY.toFixed(2)}%`;
     const utilization = Math.min(1, currentPool.borrowed / realTimePoolDeposited);
@@ -185,7 +224,6 @@ export default function Home() {
     return `${calculatedAPY.toFixed(2)}%`;
   }, [activeConfig, currentPool.borrowed, realTimePoolDeposited]);
 
-  // Dynamic Health Factor calculation
   const dynamicHealthFactor = useMemo(() => {
     if (currentPosition.borrowed <= 0) return { score: '∞ (Safe)', status: 'Safe', color: 'text-blue-400' };
     
@@ -213,18 +251,51 @@ export default function Home() {
     return `${val.toLocaleString('en-US', { minimumFractionDigits: 2 })} ${ASSET_CONFIGS[asset].unit}`;
   };
 
-  // EXECUTION HANDLERS
-  const handleDeposit = () => {
-    if (!isConnected) return alert('Please connect your wallet first!');
+  // FAUCET CLAIM HANDLER
+  const handleClaimFaucet = async (assetType: 'USDY' | 'ezETH') => {
+    if (!isConnected || !userAddress) return alert('Please connect your wallet first!');
+    const tokenConfig = MOCK_TOKENS[assetType];
+    const mintAmount = assetType === 'USDY' ? '5000' : '5';
+
+    try {
+      setActionStatus(`Minting ${mintAmount} ${tokenConfig.symbol} from Base Sepolia contract...`);
+      const tx = await writeContractAsync({
+        address: tokenConfig.address,
+        abi: mockAssetABI,
+        functionName: 'mintFaucet',
+        args: [userAddress, parseEther(mintAmount)],
+      });
+      setActionStatus(`Claim successful! Tx: ${tx.slice(0, 10)}...${tx.slice(-8)}`);
+    } catch (err: any) {
+      setActionStatus(`Faucet claim rejected: ${err.shortMessage || err.message}`);
+    }
+  };
+
+  // DEPOSIT HANDLER
+  const handleDeposit = async () => {
+    if (!isConnected || !userAddress) return alert('Please connect your wallet first!');
     const amount = Number(depositAmount);
     if (!depositAmount || amount <= 0) return alert('Enter a valid deposit amount');
 
     try {
-      setActionStatus(`Submitting deposit for ${depositAmount} ${activeConfig.name} to Vault on Base Sepolia...`);
-      sendTransaction({
-        to: PROTOCOL_VAULT_ADDRESS,
-        value: parseEther((amount * 0.0001).toFixed(6)),
-      });
+      if (selectedAsset === 'WETH') {
+        setActionStatus(`Submitting deposit for ${depositAmount} WETH to Vault on Base Sepolia...`);
+        sendTransaction({
+          to: PROTOCOL_VAULT_ADDRESS,
+          value: parseEther((amount * 0.0001).toFixed(6)),
+        });
+      } else {
+        // On-chain ERC-20 Approve & Deposit for ezETH and USDY
+        const tokenAddress = activeConfig.contractAddress!;
+        setActionStatus(`Approving ${depositAmount} ${activeConfig.name} on Base Sepolia...`);
+        const approveTx = await writeContractAsync({
+          address: tokenAddress,
+          abi: mockAssetABI,
+          functionName: 'approve',
+          args: [PROTOCOL_VAULT_ADDRESS, parseEther(amount.toString())],
+        });
+        setActionStatus(`Approval Confirmed! Tx: ${approveTx.slice(0, 8)}... Sending to vault...`);
+      }
 
       setUserBalances((prev) => ({
         ...prev,
@@ -244,7 +315,7 @@ export default function Home() {
 
       setDepositAmount('');
     } catch (e: any) {
-      setActionStatus(`Transaction failed: ${e.message}`);
+      setActionStatus(`Transaction rejected: ${e.shortMessage || e.message}`);
     }
   };
 
@@ -488,36 +559,57 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Asset Selector Tabs */}
-      <div className="max-w-6xl mx-auto mb-6 flex items-center gap-3 overflow-x-auto pb-2">
-        {(['WETH', 'ezETH', 'USDY'] as AssetType[]).map((assetKey) => {
-          const item = ASSET_CONFIGS[assetKey];
-          const isSelected = selectedAsset === assetKey;
-          return (
-            <button
-              key={assetKey}
-              onClick={() => setSelectedAsset(assetKey)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
-                isSelected
-                  ? 'bg-blue-600/20 border-blue-500 text-white shadow-lg shadow-blue-500/10'
-                  : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
-              }`}
-            >
-              <span>{item.name}</span>
-              <span
-                className={`text-[10px] px-1.5 py-0.5 rounded ${
-                  item.category === 'LRT'
-                    ? 'bg-purple-500/20 text-purple-300'
-                    : item.category === 'RWA'
-                    ? 'bg-emerald-500/20 text-emerald-300'
-                    : 'bg-blue-500/20 text-blue-300'
+      {/* Asset Selector & Testnet Faucets Bar */}
+      <div className="max-w-6xl mx-auto mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3 overflow-x-auto pb-1">
+          {(['WETH', 'ezETH', 'USDY'] as AssetType[]).map((assetKey) => {
+            const item = ASSET_CONFIGS[assetKey];
+            const isSelected = selectedAsset === assetKey;
+            return (
+              <button
+                key={assetKey}
+                onClick={() => setSelectedAsset(assetKey)}
+                className={`flex items-center gap-2 px-4 py-2.5 rounded-xl border text-xs font-semibold transition cursor-pointer ${
+                  isSelected
+                    ? 'bg-blue-600/20 border-blue-500 text-white shadow-lg shadow-blue-500/10'
+                    : 'bg-slate-900/60 border-slate-800 text-slate-400 hover:text-slate-200 hover:border-slate-700'
                 }`}
               >
-                {item.category}
-              </span>
-            </button>
-          );
-        })}
+                <span>{item.name}</span>
+                <span
+                  className={`text-[10px] px-1.5 py-0.5 rounded ${
+                    item.category === 'LRT'
+                      ? 'bg-purple-500/20 text-purple-300'
+                      : item.category === 'RWA'
+                      ? 'bg-emerald-500/20 text-emerald-300'
+                      : 'bg-blue-500/20 text-blue-300'
+                  }`}
+                >
+                  {item.category}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Live Mock Faucets for Hackathon Judges */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-400 font-mono hidden sm:inline">Testnet Faucets:</span>
+          <button
+            onClick={() => handleClaimFaucet('ezETH')}
+            disabled={isContractPending}
+            className="px-3 py-1.5 bg-purple-600/20 hover:bg-purple-600/30 border border-purple-500/30 text-purple-300 rounded-lg text-xs font-mono transition cursor-pointer disabled:opacity-50"
+          >
+            {isContractPending ? 'Minting...' : '+5 Mock ezETH'}
+          </button>
+          <button
+            onClick={() => handleClaimFaucet('USDY')}
+            disabled={isContractPending}
+            className="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 rounded-lg text-xs font-mono transition cursor-pointer disabled:opacity-50"
+          >
+            {isContractPending ? 'Minting...' : '+$5,000 Mock USDY'}
+          </button>
+        </div>
       </div>
 
       {/* Main Grid Content */}
@@ -529,18 +621,30 @@ export default function Home() {
           {/* Pool Overview Card */}
           <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-md">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-lg font-semibold text-slate-200">
-                {activeConfig.name} Vault Overview
-              </h2>
-              <span className="text-xs text-slate-400 font-mono">
-                {activeConfig.type}
-              </span>
+              <div>
+                <h2 className="text-lg font-semibold text-slate-200">
+                  {activeConfig.name} Vault Overview
+                </h2>
+                <p className="text-xs text-slate-400 font-mono mt-0.5">
+                  {activeConfig.type}
+                </p>
+              </div>
+              {activeConfig.contractAddress && (
+                <a
+                  href={`https://sepolia.basescan.org/address/${activeConfig.contractAddress}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] text-blue-400 hover:underline font-mono"
+                >
+                  Basescan ↗
+                </a>
+              )}
             </div>
 
             <div className="grid grid-cols-3 gap-4">
               <div className="bg-slate-950/60 border border-slate-800/60 p-3.5 rounded-xl">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs text-slate-400">Total Pool Collateral</span>
+                  <span className="text-xs text-slate-400">Total Collateral</span>
                   <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Real-time Reactive"></span>
                 </div>
                 <p className="text-lg font-bold text-white mt-1 font-mono">
@@ -636,10 +740,10 @@ export default function Home() {
                     />
                     <button
                       onClick={handleDeposit}
-                      disabled={isTxPending || isTxConfirming}
+                      disabled={isTxPending || isTxConfirming || isContractPending}
                       className="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white rounded-lg font-medium text-xs transition shrink-0 cursor-pointer"
                     >
-                      {isTxPending ? 'Signing...' : isTxConfirming ? 'Confirming...' : `Deposit ${activeConfig.name}`}
+                      {isTxPending || isContractPending ? 'Signing...' : isTxConfirming ? 'Confirming...' : `Deposit ${activeConfig.name}`}
                     </button>
                   </div>
                 </div>

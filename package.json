@@ -26,7 +26,21 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.2",
+    "hardhat": "^3.14.0",
     "tailwindcss": "^4",
     "typescript": "^5"
-  }
+  },
+  "description": "> **Autonomous Multi-Asset Lending Sentinel with AI C-Level Risk Governance on Base.**",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Winnnnnnnnnnnnnnnnn/echelon-protocol.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Winnnnnnnnnnnnnnnnn/echelon-protocol/issues"
+  },
+  "homepage": "https://github.com/Winnnnnnnnnnnnnnnnn/echelon-protocol#readme"
 }
