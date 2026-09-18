@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import Groq from 'groq-sdk';
 import { GoogleGenAI } from '@google/genai';
 
 export async function POST(req: Request) {
@@ -6,67 +7,81 @@ export async function POST(req: Request) {
     const { role, vaultData } = await req.json();
     let telemetry = '';
 
-    const geminiKey = process.env.GEMINI_API_KEY || '';
-    if (!geminiKey) {
-      return NextResponse.json({ success: false, error: 'GEMINI_API_KEY tidak ditemukan di .env.local' }, { status: 500 });
+    // Konfigurasi instruksi per role
+    const roleConfig: Record<string, { system: string; prompt: string; temp: number }> = {
+      CRO: {
+        system: 'You are Echelon AI CRO. Analyze collateral safety & liquidation thresholds on Base. Respond strictly in 2 concise sentences with Risk Level (Low/Medium/High).',
+        prompt: `Snapshot: ${JSON.stringify(vaultData || {})}`,
+        temp: 0.1,
+      },
+      CFO: {
+        system: 'You are Echelon AI CFO. Calculate dynamic borrow utilization & pool APY. Respond strictly in 2 concise sentences with actionable yield optimization.',
+        prompt: `Metrics: ${JSON.stringify(vaultData || {})}`,
+        temp: 0.2,
+      },
+      COO: {
+        system: 'You are Echelon AI COO. Monitor Base network gas stability (Gwei), RPC latency, and relayer uptime. Respond strictly in 2 concise sentences confirming operational infrastructure health.',
+        prompt: `Telemetry: ${JSON.stringify(vaultData || {})}`,
+        temp: 0.1,
+      },
+      CTO: {
+        system: 'You are Echelon AI CTO. Inspect smart contract circuit breakers, oracle price feed deviation, and mempool exploit risks. Respond strictly in 2 concise sentences providing an automated protocol security verdict.',
+        prompt: `Security Audit Data: ${JSON.stringify(vaultData || {})}`,
+        temp: 0.1,
+      },
+    };
+
+    const targetConfig = roleConfig[role];
+    if (!targetConfig) {
+      return NextResponse.json({ success: false, error: 'Invalid role' }, { status: 400 });
     }
 
-    const ai = new GoogleGenAI({ apiKey: geminiKey });
+    const groqKey = process.env.GROQ_API_KEY;
+    const geminiKey = process.env.GEMINI_API_KEY;
 
-    // 1. AI CRO -> Collateral Risk & Liquidation Sentinel
-    if (role === 'CRO') {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: [{ role: 'user', parts: [{ text: `Snapshot: ${JSON.stringify(vaultData || {})}` }] }],
-        config: {
-          systemInstruction: 'You are Echelon AI CRO. Analyze collateral safety & liquidation thresholds on Base. Respond strictly in 2 concise sentences with Risk Level (Low/Medium/High).',
-          temperature: 0.1,
-        },
-      });
-      telemetry = response.text || 'CRO Telemetry OK';
+    // 1. Primary Engine: Groq LPU (openai/gpt-oss-20b)
+    if (groqKey) {
+      try {
+        const groq = new Groq({ apiKey: groqKey });
+        const completion = await groq.chat.completions.create({
+          messages: [
+            { role: 'system', content: targetConfig.system },
+            { role: 'user', content: targetConfig.prompt },
+          ],
+          model: 'openai/gpt-oss-20b',
+          temperature: targetConfig.temp,
+          max_tokens: 250,
+        });
+
+        telemetry = completion.choices[0]?.message?.content || `${role} Telemetry OK`;
+      } catch (groqErr) {
+        console.warn('[Echelon Sentinel] Groq failed, switching to Gemini fallback:', groqErr);
+      }
     }
 
-    // 2. AI CFO -> Yield, APY & Dynamic Rebalancing Sentinel
-    else if (role === 'CFO') {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: [{ role: 'user', parts: [{ text: `Metrics: ${JSON.stringify(vaultData || {})}` }] }],
-        config: {
-          systemInstruction: 'You are Echelon AI CFO. Calculate dynamic borrow utilization & pool APY. Respond strictly in 2 concise sentences with actionable yield optimization.',
-          temperature: 0.2,
-        },
-      });
-      telemetry = response.text || 'CFO Telemetry OK';
+    // 2. Secondary Engine: Gemini Fallback
+    if (!telemetry && geminiKey) {
+      try {
+        const ai = new GoogleGenAI({ apiKey: geminiKey });
+        const response = await ai.models.generateContent({
+          model: 'gemini-2.5-flash',
+          contents: [{ role: 'user', parts: [{ text: targetConfig.prompt }] }],
+          config: {
+            systemInstruction: targetConfig.system,
+            temperature: targetConfig.temp,
+          },
+        });
+        telemetry = response.text || `${role} Telemetry OK`;
+      } catch (geminiErr) {
+        console.error('[Echelon Sentinel] Fallback Gemini failed:', geminiErr);
+      }
     }
 
-    // 3. AI COO -> Base Network Gas & RPC Operations Sentinel
-    else if (role === 'COO') {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: [{ role: 'user', parts: [{ text: `Telemetry: ${JSON.stringify(vaultData || {})}` }] }],
-        config: {
-          systemInstruction: 'You are Echelon AI COO. Monitor Base network gas stability (Gwei), RPC latency, and relayer uptime. Respond strictly in 2 concise sentences confirming operational infrastructure health.',
-          temperature: 0.1,
-        },
-      });
-      telemetry = response.text || 'COO Telemetry OK';
-    }
-
-    // 4. AI CTO -> Smart Contract & Circuit Breaker Guard
-    else if (role === 'CTO') {
-      const response = await ai.models.generateContent({
-        model: 'gemini-3.6-flash',
-        contents: [{ role: 'user', parts: [{ text: `Security Audit Data: ${JSON.stringify(vaultData || {})}` }] }],
-        config: {
-          systemInstruction: 'You are Echelon AI CTO. Inspect smart contract circuit breakers, oracle price feed deviation, and mempool exploit risks. Respond strictly in 2 concise sentences providing an automated protocol security verdict.',
-          temperature: 0.1,
-        },
-      });
-      telemetry = response.text || 'CTO Telemetry OK';
-    }
-
-    else {
-      return NextResponse.json({ error: 'Invalid role' }, { status: 400 });
+    if (!telemetry) {
+      return NextResponse.json(
+        { success: false, error: 'Both Groq and Gemini engines failed to process request.' },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ success: true, role, telemetry });
