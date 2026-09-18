@@ -153,7 +153,7 @@ export default function Home() {
   const { address: userAddress, isConnected } = useAccount();
   
   // Native Gas Transaction
-  const { data: hash, sendTransaction, isPending: isTxPending } = useSendTransaction();
+  const { data: hash, sendTransactionAsync, isPending: isTxPending } = useSendTransaction();
   const { isLoading: isTxConfirming, isSuccess: isTxSuccess } = useWaitForTransactionReceipt({ hash });
 
   // ERC-20 Mock Contract Interaction
@@ -271,21 +271,21 @@ export default function Home() {
     }
   };
 
-  // DEPOSIT HANDLER
+  // DEPOSIT HANDLER (On-chain + API Sync + Telegram Alert)
   const handleDeposit = async () => {
     if (!isConnected || !userAddress) return alert('Please connect your wallet first!');
     const amount = Number(depositAmount);
     if (!depositAmount || amount <= 0) return alert('Enter a valid deposit amount');
 
     try {
+      setIsProcessingVaultTx(true);
       if (selectedAsset === 'WETH') {
         setActionStatus(`Submitting deposit for ${depositAmount} WETH to Vault on Base Sepolia...`);
-        sendTransaction({
+        await sendTransactionAsync({
           to: PROTOCOL_VAULT_ADDRESS,
           value: parseEther((amount * 0.0001).toFixed(6)),
         });
       } else {
-        // On-chain ERC-20 Approve & Deposit for ezETH and USDY
         const tokenAddress = activeConfig.contractAddress!;
         setActionStatus(`Approving ${depositAmount} ${activeConfig.name} on Base Sepolia...`);
         const approveTx = await writeContractAsync({
@@ -294,8 +294,20 @@ export default function Home() {
           functionName: 'approve',
           args: [PROTOCOL_VAULT_ADDRESS, parseEther(amount.toString())],
         });
-        setActionStatus(`Approval Confirmed! Tx: ${approveTx.slice(0, 8)}... Sending to vault...`);
+        setActionStatus(`Approval Confirmed! Tx: ${approveTx.slice(0, 8)}...`);
       }
+
+      // Sync ke backend API dan kirim Telegram Alert
+      await fetch('/api/vault-transfer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userAddress,
+          amount: depositAmount,
+          actionType: 'deposit',
+          assetName: activeConfig.name,
+        }),
+      });
 
       setUserBalances((prev) => ({
         ...prev,
@@ -313,14 +325,19 @@ export default function Home() {
         },
       }));
 
+      refetchVaultBalance();
+      setActionStatus(`Deposit successful! Alert dispatched to Telegram Sentinel.`);
       setDepositAmount('');
     } catch (e: any) {
       setActionStatus(`Transaction rejected: ${e.shortMessage || e.message}`);
+    } finally {
+      setIsProcessingVaultTx(false);
     }
   };
 
+  // WITHDRAW HANDLER
   const handleWithdraw = async () => {
-    if (!isConnected) return alert('Please connect your wallet first!');
+    if (!isConnected || !userAddress) return alert('Please connect your wallet first!');
     const amount = Number(withdrawAmount);
     if (!withdrawAmount || amount <= 0) return alert('Enter a valid withdrawal amount');
 
@@ -345,6 +362,7 @@ export default function Home() {
           userAddress,
           amount: withdrawAmount,
           actionType: 'withdraw',
+          assetName: activeConfig.name,
         }),
       });
 
@@ -377,8 +395,9 @@ export default function Home() {
     }
   };
 
+  // BORROW HANDLER
   const handleBorrow = async () => {
-    if (!isConnected) return alert('Please connect your wallet first!');
+    if (!isConnected || !userAddress) return alert('Please connect your wallet first!');
     const amount = Number(borrowAmount);
     if (!borrowAmount || amount <= 0) return alert('Enter a valid borrow amount');
 
@@ -401,6 +420,7 @@ export default function Home() {
           userAddress,
           amount: borrowAmount,
           actionType: 'borrow',
+          assetName: activeConfig.name,
         }),
       });
 
@@ -433,8 +453,9 @@ export default function Home() {
     }
   };
 
-  const handleRepay = () => {
-    if (!isConnected) return alert('Please connect your wallet first!');
+  // REPAY HANDLER (On-chain + API Sync + Telegram Alert)
+  const handleRepay = async () => {
+    if (!isConnected || !userAddress) return alert('Please connect your wallet first!');
     const amount = Number(repayAmount);
     if (!repayAmount || amount <= 0) return alert('Enter a valid repayment amount');
 
@@ -447,10 +468,23 @@ export default function Home() {
     }
 
     try {
+      setIsProcessingVaultTx(true);
       setActionStatus(`Submitting debt repayment of ${repayAmount} USDC to Vault...`);
-      sendTransaction({
+      await sendTransactionAsync({
         to: PROTOCOL_VAULT_ADDRESS,
         value: parseEther((amount * 0.0001).toFixed(6)),
+      });
+
+      // Sync ke backend API dan kirim Telegram Alert
+      await fetch('/api/vault-transfer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userAddress,
+          amount: repayAmount,
+          actionType: 'repay',
+          assetName: activeConfig.name,
+        }),
       });
 
       setUserBalances((prev) => ({
@@ -469,9 +503,12 @@ export default function Home() {
         },
       }));
 
+      setActionStatus(`Debt repayment confirmed! Alert dispatched to Telegram.`);
       setRepayAmount('');
     } catch (e: any) {
-      setActionStatus(`Repayment failed: ${e.message}`);
+      setActionStatus(`Repayment failed: ${e.shortMessage || e.message}`);
+    } finally {
+      setIsProcessingVaultTx(false);
     }
   };
 
@@ -592,7 +629,7 @@ export default function Home() {
           })}
         </div>
 
-        {/* Live Mock Faucets for Hackathon Judges */}
+        {/* Live Mock Faucets */}
         <div className="flex items-center gap-2">
           <span className="text-xs text-slate-400 font-mono hidden sm:inline">Testnet Faucets:</span>
           <button
@@ -663,7 +700,7 @@ export default function Home() {
               </div>
             </div>
 
-            {/* User Realtime Position in Vault */}
+            {/* User Realtime Position */}
             <div className="mt-4 p-3 bg-slate-950/70 border border-slate-800 rounded-xl grid grid-cols-2 gap-3 text-xs">
               <div>
                 <span className="text-slate-400">Your Deposited Collateral:</span>
@@ -740,10 +777,10 @@ export default function Home() {
                     />
                     <button
                       onClick={handleDeposit}
-                      disabled={isTxPending || isTxConfirming || isContractPending}
+                      disabled={isTxPending || isTxConfirming || isContractPending || isProcessingVaultTx}
                       className="px-5 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 text-white rounded-lg font-medium text-xs transition shrink-0 cursor-pointer"
                     >
-                      {isTxPending || isContractPending ? 'Signing...' : isTxConfirming ? 'Confirming...' : `Deposit ${activeConfig.name}`}
+                      {isProcessingVaultTx || isTxPending || isContractPending ? 'Processing...' : isTxConfirming ? 'Confirming...' : `Deposit ${activeConfig.name}`}
                     </button>
                   </div>
                 </div>
@@ -822,10 +859,10 @@ export default function Home() {
                     />
                     <button
                       onClick={handleRepay}
-                      disabled={isTxPending || isTxConfirming}
+                      disabled={isTxPending || isTxConfirming || isProcessingVaultTx}
                       className="px-5 py-2 bg-amber-600 hover:bg-amber-500 disabled:bg-slate-800 text-white rounded-lg font-medium text-xs transition shrink-0 cursor-pointer"
                     >
-                      {isTxPending ? 'Signing...' : isTxConfirming ? 'Confirming...' : 'Repay Debt'}
+                      {isProcessingVaultTx || isTxPending ? 'Signing...' : isTxConfirming ? 'Confirming...' : 'Repay Debt'}
                     </button>
                   </div>
                 </div>
@@ -842,7 +879,7 @@ export default function Home() {
 
         </div>
 
-        {/* RIGHT COLUMN: 4 GEMINI FLASH C-LEVEL SENTINEL AGENTS */}
+        {/* RIGHT COLUMN: 4 GROQ LPU C-LEVEL SENTINEL AGENTS */}
         <div className="lg:col-span-5 space-y-4">
           <div className="flex justify-between items-center px-1">
             <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
