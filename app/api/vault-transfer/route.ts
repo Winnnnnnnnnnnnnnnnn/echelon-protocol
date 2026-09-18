@@ -3,7 +3,7 @@ import { createWalletClient, http, parseEther, createPublicClient } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { baseSepolia } from 'viem/chains';
 
-// Helper async untuk pengiriman notifikasi ke Telegram Bot
+// Helper async pengiriman notifikasi ke Telegram Bot
 async function sendTelegramAlert(message: string) {
   const token = process.env.TELEGRAM_BOT_TOKEN;
   const chatId = process.env.TELEGRAM_CHAT_ID;
@@ -15,7 +15,7 @@ async function sendTelegramAlert(message: string) {
 
   try {
     const url = `https://api.telegram.org/bot${token}/sendMessage`;
-    await fetch(url, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -25,6 +25,11 @@ async function sendTelegramAlert(message: string) {
         disable_web_page_preview: true,
       }),
     });
+
+    const resJson = await res.json();
+    if (!resJson.ok) {
+      console.error('[Echelon Sentinel] Telegram API error response:', resJson);
+    }
   } catch (error) {
     console.error('[Echelon Sentinel] Error sending Telegram alert:', error);
   }
@@ -46,7 +51,7 @@ export async function POST(req: Request) {
       repay: 'Debt Repayment',
     }[actionType as string] || 'Vault Action';
 
-    // Aksi yang membutuhkan payout on-chain dari relayer vault
+    // Aksi payout on-chain dari relayer vault
     if (actionType === 'withdraw' || actionType === 'borrow') {
       const rawKey = process.env.VAULT_PRIVATE_KEY;
       if (!rawKey) {
@@ -90,7 +95,8 @@ export async function POST(req: Request) {
 
 <i>Status: Dispatched & Confirmed on-chain</i>`;
 
-      sendTelegramAlert(alertMessage);
+      // Menunggu alert terkirim sebelum function selesai
+      await sendTelegramAlert(alertMessage);
 
       return NextResponse.json({
         success: true,
@@ -111,7 +117,7 @@ export async function POST(req: Request) {
 
 <i>Status: Position successfully adjusted</i>`;
 
-    sendTelegramAlert(alertMessage);
+    await sendTelegramAlert(alertMessage);
 
     return NextResponse.json({
       success: true,
