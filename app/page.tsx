@@ -848,7 +848,7 @@ export default function Home() {
             <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">
               Autonomous C-Level Agents
             </h2>
-            <span className="text-[11px] text-blue-400 font-mono">Gemini 3.6 Flash</span>
+            <span className="text-[11px] text-blue-400 font-mono">Powered by Groq LPU (GPT-OSS 20B)</span>
           </div>
 
           {/* AI CRO */}
